@@ -249,7 +249,7 @@ function renderFormPhotos() {
     cell.className = 'photo-cell';
     const im = document.createElement('img');
     im.src = viewURL(p.blob); im.alt = '';
-    im.addEventListener('click', () => openLightbox(p.blob));
+    im.addEventListener('click', () => openLightbox(state.form.photos.map((x) => x.blob), idx));
     const del = document.createElement('button');
     del.type = 'button';
     del.className = 'photo-del';
@@ -378,15 +378,16 @@ async function renderDetailPhotos(id) {
   grid.innerHTML = '';
   const photos = (await dbGetByIndex('photos', 'byRestaurant', id)).sort((a, b) => a.createdAt - b.createdAt);
   $('#d_photocount').textContent = photos.length ? `(${photos.length})` : '（なし）';
-  for (const p of photos) {
+  const blobs = photos.map((p) => p.blob);
+  photos.forEach((p, i) => {
     const cell = document.createElement('div');
     cell.className = 'photo-cell';
     const im = document.createElement('img');
     im.src = viewURL(p.blob); im.alt = '';
-    im.addEventListener('click', () => openLightbox(p.blob));
+    im.addEventListener('click', () => openLightbox(blobs, i));
     cell.appendChild(im);
     grid.appendChild(cell);
-  }
+  });
   oldUrls.forEach((u) => URL.revokeObjectURL(u));
 }
 
@@ -400,39 +401,62 @@ async function toggleStatus() {
   await openDetail(r.id);
 }
 
-/* ---------- 写真の拡大表示（ピンチ/パン/ダブルタップ） ---------- */
+/* ---------- 写真の拡大表示（スワイプ移動/ピンチ/パン/ダブルタップ） ---------- */
+const SWIPE_THRESHOLD = 55; // これ以上の横移動で次/前へ
 const lb = {
-  scale: 1, tx: 0, ty: 0, url: null,
+  photos: [], index: 0, url: null,
+  scale: 1, tx: 0, ty: 0,
   startDist: 0, startScale: 1, startTx: 0, startTy: 0,
-  panX: 0, panY: 0, lastTap: 0, moved: false, downOnImage: false,
+  startX: 0, startY: 0, dragDX: 0, dragDY: 0,
+  lastTap: 0, moved: false, downOnImage: false,
 };
 
 function applyLb() {
   $('#lightboxImg').style.transform = `translate(${lb.tx}px, ${lb.ty}px) scale(${lb.scale})`;
 }
+function animateLb(on) {
+  $('#lightboxImg').classList.toggle('animating', !!on);
+}
 
-function openLightbox(blob) {
-  const box = $('#lightbox');
+function loadLbPhoto(i) {
+  lb.index = i;
   const img = $('#lightboxImg');
   if (lb.url) URL.revokeObjectURL(lb.url);
-  lb.url = URL.createObjectURL(blob);
+  lb.url = URL.createObjectURL(lb.photos[i]);
   img.src = lb.url;
   lb.scale = 1; lb.tx = 0; lb.ty = 0;
   applyLb();
-  box.hidden = false;
+  const n = lb.photos.length;
+  $('#lightboxCount').textContent = n > 1 ? `${i + 1} / ${n}` : '';
+}
+
+// blobs: この店の全写真, index: 開始位置
+function openLightbox(blobs, index) {
+  lb.photos = blobs.slice();
+  animateLb(false);
+  loadLbPhoto(index || 0);
+  $('#lightbox').hidden = false;
   document.body.style.overflow = 'hidden';
 }
 
 function closeLightbox() {
   const box = $('#lightbox');
-  const img = $('#lightboxImg');
   box.hidden = true;
-  img.src = '';
+  $('#lightboxImg').src = '';
   if (lb.url) { URL.revokeObjectURL(lb.url); lb.url = null; }
-  // 背後にモーダルがある場合は overflow:hidden を維持
+  lb.photos = [];
   if ($('#detailModal').hidden && $('#editModal').hidden && $('#menuModal').hidden) {
     document.body.style.overflow = '';
   }
+}
+
+// dir: +1 次へ / -1 前へ。端なら弾んで戻る
+function lbNav(dir) {
+  const n = lb.photos.length;
+  const i = lb.index + dir;
+  animateLb(true);
+  if (i < 0 || i >= n) { lb.tx = 0; applyLb(); return; }
+  loadLbPhoto(i);
 }
 
 function touchDist(t) {
@@ -444,6 +468,7 @@ function bindLightbox() {
   $('#lightboxClose').addEventListener('click', closeLightbox);
 
   box.addEventListener('touchstart', (e) => {
+    animateLb(false);
     if (e.touches.length === 2) {
       lb.startDist = touchDist(e.touches);
       lb.startScale = lb.scale;
@@ -451,8 +476,9 @@ function bindLightbox() {
     } else if (e.touches.length === 1) {
       lb.moved = false;
       lb.downOnImage = (e.target && e.target.id === 'lightboxImg');
-      lb.panX = e.touches[0].clientX; lb.panY = e.touches[0].clientY;
+      lb.startX = e.touches[0].clientX; lb.startY = e.touches[0].clientY;
       lb.startTx = lb.tx; lb.startTy = lb.ty;
+      lb.dragDX = 0; lb.dragDY = 0;
     }
   }, { passive: false });
 
@@ -462,32 +488,56 @@ function bindLightbox() {
       const d = touchDist(e.touches);
       if (lb.startDist > 0) lb.scale = Math.min(5, Math.max(1, lb.startScale * (d / lb.startDist)));
       applyLb();
-    } else if (e.touches.length === 1) {
-      const dx = e.touches[0].clientX - lb.panX;
-      const dy = e.touches[0].clientY - lb.panY;
-      if (Math.abs(dx) > 6 || Math.abs(dy) > 6) lb.moved = true;
-      if (lb.scale > 1) { lb.tx = lb.startTx + dx; lb.ty = lb.startTy + dy; applyLb(); }
+      return;
+    }
+    if (e.touches.length !== 1) return;
+    const dx = e.touches[0].clientX - lb.startX;
+    const dy = e.touches[0].clientY - lb.startY;
+    lb.dragDX = dx; lb.dragDY = dy;
+    if (Math.abs(dx) > 6 || Math.abs(dy) > 6) lb.moved = true;
+    if (lb.scale > 1) {
+      // 拡大中は1本指でパン
+      lb.tx = lb.startTx + dx; lb.ty = lb.startTy + dy; applyLb();
+    } else {
+      // 等倍のときは横スワイプでめくる（指に画像を追従させる）
+      lb.tx = dx; lb.ty = 0; applyLb();
     }
   }, { passive: false });
 
   box.addEventListener('touchend', (e) => {
     if (e.touches.length > 0) return;
-    if (lb.scale <= 1.02) { lb.scale = 1; lb.tx = 0; lb.ty = 0; applyLb(); }
-    if (lb.moved) return;
+
+    // 拡大中：パン確定のみ、ナビはしない
+    if (lb.scale > 1) {
+      if (!lb.moved) handleTap();
+      return;
+    }
+    // 等倍：スワイプ or タップ
+    if (lb.moved) {
+      const horizontal = Math.abs(lb.dragDX) > Math.abs(lb.dragDY);
+      if (horizontal && Math.abs(lb.dragDX) > SWIPE_THRESHOLD) {
+        lbNav(lb.dragDX < 0 ? 1 : -1);   // 左スワイプ=次 / 右スワイプ=前
+      } else {
+        animateLb(true); lb.tx = 0; lb.ty = 0; applyLb(); // 戻す
+      }
+      return;
+    }
+    handleTap();
+  });
+
+  function handleTap() {
     const now = Date.now();
     if (now - lb.lastTap < 300 && lb.downOnImage) {
-      // 画像をダブルタップ → ズーム切替
       if (lb.scale > 1) { lb.scale = 1; lb.tx = 0; lb.ty = 0; } else { lb.scale = 2.5; }
-      applyLb();
+      animateLb(true); applyLb();
       lb.lastTap = 0;
     } else {
       lb.lastTap = now;
-      // 画像の外（空いた所）を単タップ → 閉じる
-      if (!lb.downOnImage) closeLightbox();
+      if (!lb.downOnImage) closeLightbox(); // 画像の外を単タップ→閉じる
     }
-  });
+  }
 
-  // PC（マウス）：背景クリックで閉じる
+  // PC（マウス）：背景クリックで閉じる、左右端クリックでめくる補助はナシ（スワイプ主体）
   box.addEventListener('mousedown', (e) => { if (e.target === box) closeLightbox(); });
 }
 

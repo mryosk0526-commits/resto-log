@@ -269,6 +269,12 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--brand-soft)
   text-align: center; color: rgba(255,255,255,.7); font-size: 12px; margin: 0; padding: 0 16px;
   pointer-events: none;
 }
+.lightbox-count {
+  position: absolute; top: calc(16px + var(--safe-top)); left: 0; right: 0;
+  text-align: center; color: rgba(255,255,255,.9); font-size: 14px; font-weight: 600;
+  pointer-events: none;
+}
+.lightbox img.animating { transition: transform .2s ease; }
 
 /* ===== トースト ===== */
 .toast {
