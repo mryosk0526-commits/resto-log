@@ -317,7 +317,8 @@ async function openEdit(r) {
   // 日付: 既存店はその日付（無ければ登録日）、新規は今日
   $('#f_date').value = r ? ((r.date) || dateToStr(r.createdAt)) : todayStr();
   $('#f_dateNote').textContent = '';
-  state.form.dateManual = !!r; // 既存は"設定済み"扱い（写真日時で勝手に上書きしない）
+  // 手入力があるまでは、写真を足したら撮影日で上書きしてよい（既存店でも）
+  state.form.dateManual = false;
 
   // 写真ステージングを初期化（既存店なら現在の写真を読み込む）
   state.form.photos = [];
@@ -370,7 +371,6 @@ function removeFormPhoto(idx) {
 async function addFormPhotos(files) {
   const room = MAX_PHOTOS - state.form.photos.length;
   if (room <= 0) { toast(`写真は${MAX_PHOTOS}枚までです`); return; }
-  const wasEmpty = state.form.photos.length === 0; // 1枚目かどうか
   const picked = Array.from(files).slice(0, room);
   if (files.length > room) toast(`残り${room}枚だけ追加できます`);
 
@@ -379,10 +379,13 @@ async function addFormPhotos(files) {
   label.textContent = '処理中…';
   $('.photo-add').classList.add('busy');
 
-  // 1枚目の写真から撮影日を読み取り（日付が手動設定でなければ自動セット）
+  // 追加した写真から撮影日を読み取り（手入力していなければ、最も古い撮影日を日付にセット）
   let exifDate = null;
-  if (wasEmpty && picked[0] && !state.form.dateManual) {
-    exifDate = await readExifDate(picked[0]);
+  if (!state.form.dateManual) {
+    for (const f of picked) {
+      const d = await readExifDate(f);
+      if (d && (!exifDate || d < exifDate)) exifDate = d;
+    }
   }
 
   let ok = 0, fail = 0;

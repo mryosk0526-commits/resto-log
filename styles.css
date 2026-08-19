@@ -157,8 +157,8 @@ body {
   animation: slideup .22s ease;
 }
 .modal-sheet.compact { border-radius: 18px; margin: auto 12px; }
-/* 詳細（表示）画面は画面の約3/4に抑える（背後のリストが少し見える） */
-#detailModal .modal-sheet { max-height: 76vh; }
+/* 詳細（表示）画面は常に画面の約3/4の大きさ（写真が多ければ少し伸びる） */
+#detailModal .modal-sheet { min-height: 76vh; max-height: 90vh; }
 @keyframes slideup { from { transform: translateY(30px); opacity: .6; } }
 .modal-head {
   position: sticky; top: 0; background: var(--surface);
