@@ -143,6 +143,8 @@ body {
   display: flex; align-items: flex-end; justify-content: center;
   animation: fade .18s ease;
 }
+/* hidden属性が付いているときは確実に隠す（.modalのdisplay:flexに勝たせる） */
+.modal[hidden] { display: none; }
 @keyframes fade { from { opacity: 0; } }
 .modal-sheet {
   background: var(--surface);

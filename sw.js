@@ -1,5 +1,5 @@
 /* 食べ歩きメモ — Service Worker (アプリ本体のみキャッシュ / データはIndexedDB) */
-const CACHE = 'resto-log-v1';
+const CACHE = 'resto-log-v2';
 const SHELL = [
   './',
   './index.html',
