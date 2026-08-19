@@ -202,6 +202,10 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--brand-soft)
 .btn.ghost { background: var(--bg); color: var(--text); border: 1px solid var(--line); }
 .btn.ghost.danger { color: var(--brand); }
 .btn.small { font-size: 13px; padding: 7px 12px; background: var(--brand-soft); color: var(--brand); }
+.photo-add { display: inline-flex; align-items: center; justify-content: center; align-self: flex-start; }
+.photo-add.busy { opacity: .6; pointer-events: none; }
+#f_photoGrid:empty { display: none; }
+#f_photoGrid { margin-bottom: 4px; }
 .btn:active { transform: scale(.97); }
 
 /* ===== 詳細 ===== */

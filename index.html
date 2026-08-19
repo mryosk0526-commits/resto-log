@@ -81,6 +81,15 @@
             <label><input type="radio" name="f_status" value="visited" /><span>行った</span></label>
           </div>
         </fieldset>
+        <fieldset class="field">
+          <span class="label">写真 <small id="f_photocount"></small></span>
+          <div class="photo-grid" id="f_photoGrid"></div>
+          <label class="btn small photo-add">
+            <span id="f_photoAddLabel">＋ 写真を追加</span>
+            <input type="file" id="f_photoInput" accept="image/*" multiple hidden />
+          </label>
+          <p class="hint">撮影／ライブラリから選択。自動で軽く圧縮して保存（最大10枚）</p>
+        </fieldset>
         <div class="form-actions">
           <button type="button" class="btn ghost danger" id="deleteBtn" hidden>削除</button>
           <button type="submit" class="btn primary">保存</button>
@@ -104,19 +113,14 @@
         <a id="d_url" class="detail-url" href="#" target="_blank" rel="noopener" hidden>🔗 リンクを開く</a>
         <p id="d_memo" class="detail-memo"></p>
 
-        <div class="photos-head">
+        <div class="photos-head" id="d_photosHead">
           <span class="label">写真 <small id="d_photocount"></small></span>
-          <label class="btn small">
-            ＋ 追加
-            <input type="file" id="photoInput" accept="image/*" multiple hidden />
-          </label>
         </div>
-        <div class="photo-grid" id="photoGrid"></div>
-        <p class="hint" id="photoHint">写真は自動で軽く圧縮して保存します（最大10枚）</p>
+        <div class="photo-grid view" id="photoGrid"></div>
 
         <div class="detail-actions">
           <button class="btn ghost" id="toggleStatusBtn"></button>
-          <button class="btn ghost" id="editFromDetailBtn">編集</button>
+          <button class="btn primary" id="editFromDetailBtn">編集</button>
         </div>
       </div>
     </div>

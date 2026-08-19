@@ -3,7 +3,8 @@
 /* =========================================================
    食べ歩きメモ  v1
    - ログイン不要 / 全データは端末内(IndexedDB)に保存
-   - 写真は取り込み時に自動リサイズして保存
+   - 写真は「店を追加/編集」フォームの中で付ける
+   - 取り込み時に自動リサイズ＋EXIF回転補正して保存
    ========================================================= */
 
 const PREFECTURES = [
@@ -66,37 +67,50 @@ function toast(msg) {
   el.textContent = msg;
   el.hidden = false;
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => { el.hidden = true; }, 2200);
+  toast._t = setTimeout(() => { el.hidden = true; }, 2600);
 }
 
-// ObjectURL を使い回さず都度作り、解放も管理する
-const _urls = new Set();
-function objURL(blob) { const u = URL.createObjectURL(blob); _urls.add(u); return u; }
-function revokeAllURLs() { _urls.forEach((u) => URL.revokeObjectURL(u)); _urls.clear(); }
+/* ObjectURL 管理：一覧用と表示(詳細/フォーム)用を分離して安全に解放する */
+const _listUrls = new Set();
+const _viewUrls = new Set();
+const listURL = (b) => { const u = URL.createObjectURL(b); _listUrls.add(u); return u; };
+const viewURL = (b) => { const u = URL.createObjectURL(b); _viewUrls.add(u); return u; };
+const revokeListURLs = () => { _listUrls.forEach((u) => URL.revokeObjectURL(u)); _listUrls.clear(); };
+const revokeViewURLs = () => { _viewUrls.forEach((u) => URL.revokeObjectURL(u)); _viewUrls.clear(); };
 
-/* ---------- 写真リサイズ ---------- */
-function resizeImage(file) {
-  return new Promise((resolve, reject) => {
+/* ---------- 写真：デコード → リサイズ ---------- */
+// iPhone対応: createImageBitmap(回転補正付き) を優先し、失敗時は <img> にフォールバック
+async function decodeImage(file) {
+  if ('createImageBitmap' in window) {
+    try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+    catch (_) { /* フォールバックへ */ }
+  }
+  return await new Promise((res, rej) => {
     const img = new Image();
-    img.onload = () => {
-      let { width, height } = img;
-      if (width > MAX_EDGE || height > MAX_EDGE) {
-        const r = Math.min(MAX_EDGE / width, MAX_EDGE / height);
-        width = Math.round(width * r);
-        height = Math.round(height * r);
-      }
-      const canvas = document.createElement('canvas');
-      canvas.width = width; canvas.height = height;
-      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-      canvas.toBlob(
-        (blob) => blob ? resolve(blob) : reject(new Error('encode failed')),
-        'image/jpeg',
-        JPEG_QUALITY
-      );
-    };
-    img.onerror = () => reject(new Error('load failed'));
-    img.src = URL.createObjectURL(file);
+    const u = URL.createObjectURL(file);
+    img.onload = () => { URL.revokeObjectURL(u); res(img); };
+    img.onerror = () => { URL.revokeObjectURL(u); rej(new Error('decode failed')); };
+    img.src = u;
   });
+}
+
+async function resizeImage(file) {
+  const src = await decodeImage(file);
+  let w = src.width, h = src.height;
+  if (!w || !h) throw new Error('empty image');
+  if (w > MAX_EDGE || h > MAX_EDGE) {
+    const r = Math.min(MAX_EDGE / w, MAX_EDGE / h);
+    w = Math.round(w * r); h = Math.round(h * r);
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(src, 0, 0, w, h);
+  if (src.close) src.close();
+  const blob = await new Promise((res, rej) =>
+    canvas.toBlob((b) => b ? res(b) : rej(new Error('encode failed')), 'image/jpeg', JPEG_QUALITY)
+  );
+  return blob;
 }
 
 /* ---------- 状態 ---------- */
@@ -107,9 +121,11 @@ const state = {
   filterStatus: 'all',
   filterPref: '',
   currentId: null,   // 詳細表示中の店id
+  // 編集フォームの写真ステージング
+  form: { photos: [], removed: [] }, // photos: {key, blob, dbId|null}
 };
 
-/* ---------- 読み込み & 描画 ---------- */
+/* ---------- 読み込み & 一覧描画 ---------- */
 async function loadAll() {
   state.restaurants = await dbGetAll('restaurants');
   const photos = await dbGetAll('photos');
@@ -125,14 +141,13 @@ async function loadAll() {
 }
 
 function render() {
-  revokeAllURLs();
+  revokeListURLs();
   const list = $('#list');
   list.innerHTML = '';
 
   let items = state.restaurants.slice();
   if (state.filterStatus !== 'all') items = items.filter((r) => r.status === state.filterStatus);
   if (state.filterPref) items = items.filter((r) => r.prefecture === state.filterPref);
-  // 新しく追加した順（作成日時 降順）
   items.sort((a, b) => b.createdAt - a.createdAt);
 
   $('#emptyState').hidden = items.length !== 0;
@@ -147,7 +162,7 @@ function render() {
     const blob = state.firstPhoto[r.id];
     if (blob) {
       const im = document.createElement('img');
-      im.src = objURL(blob); im.alt = '';
+      im.src = listURL(blob); im.alt = '';
       thumb.appendChild(im);
     } else {
       thumb.textContent = r.status === 'visited' ? '🍽️' : '📍';
@@ -200,8 +215,8 @@ function statusBadge(status) {
   return b;
 }
 
-/* ---------- 追加/編集モーダル ---------- */
-function openEdit(r) {
+/* ---------- 追加/編集フォーム（写真もここで管理） ---------- */
+async function openEdit(r) {
   $('#editTitle').textContent = r ? '店を編集' : '店を追加';
   $('#f_id').value = r ? r.id : '';
   $('#f_name').value = r ? r.name : '';
@@ -211,8 +226,84 @@ function openEdit(r) {
   const st = r ? r.status : 'want';
   document.querySelector(`input[name=f_status][value=${st}]`).checked = true;
   $('#deleteBtn').hidden = !r;
+
+  // 写真ステージングを初期化（既存店なら現在の写真を読み込む）
+  state.form.photos = [];
+  state.form.removed = [];
+  if (r) {
+    const existing = (await dbGetByIndex('photos', 'byRestaurant', r.id)).sort((a, b) => a.createdAt - b.createdAt);
+    state.form.photos = existing.map((p) => ({ key: p.id, blob: p.blob, dbId: p.id }));
+  }
+  renderFormPhotos();
+
   showModal('#editModal');
   if (!r) setTimeout(() => $('#f_name').focus(), 100);
+}
+
+function renderFormPhotos() {
+  const oldUrls = [..._viewUrls]; _viewUrls.clear();
+  const grid = $('#f_photoGrid');
+  grid.innerHTML = '';               // 先に古い<img>を外してから
+  state.form.photos.forEach((p, idx) => {
+    const cell = document.createElement('div');
+    cell.className = 'photo-cell';
+    const im = document.createElement('img');
+    im.src = viewURL(p.blob); im.alt = '';
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'photo-del';
+    del.textContent = '✕';
+    del.setAttribute('aria-label', '写真を外す');
+    del.addEventListener('click', () => removeFormPhoto(idx));
+    cell.appendChild(im);
+    cell.appendChild(del);
+    grid.appendChild(cell);
+  });
+  const n = state.form.photos.length;
+  $('#f_photocount').textContent = `(${n}/${MAX_PHOTOS})`;
+  const addBtn = $('.photo-add');
+  addBtn.style.display = n >= MAX_PHOTOS ? 'none' : '';
+  oldUrls.forEach((u) => URL.revokeObjectURL(u)); // 差し替え後に旧URLを解放
+}
+
+function removeFormPhoto(idx) {
+  const p = state.form.photos[idx];
+  if (!p) return;
+  if (p.dbId) state.form.removed.push(p.dbId); // 既存写真は保存時に削除
+  state.form.photos.splice(idx, 1);
+  renderFormPhotos();
+}
+
+async function addFormPhotos(files) {
+  const room = MAX_PHOTOS - state.form.photos.length;
+  if (room <= 0) { toast(`写真は${MAX_PHOTOS}枚までです`); return; }
+  const picked = Array.from(files).slice(0, room);
+  if (files.length > room) toast(`残り${room}枚だけ追加できます`);
+
+  const label = $('#f_photoAddLabel');
+  const original = label.textContent;
+  label.textContent = '処理中…';
+  $('.photo-add').classList.add('busy');
+
+  let ok = 0, fail = 0;
+  for (const file of picked) {
+    try {
+      const blob = await resizeImage(file);
+      state.form.photos.push({ key: uid(), blob, dbId: null });
+      ok++;
+    } catch (err) {
+      console.error('写真の処理に失敗', file && file.name, err);
+      fail++;
+    }
+  }
+
+  label.textContent = original;
+  $('.photo-add').classList.remove('busy');
+  renderFormPhotos();
+
+  if (ok && !fail) toast(`${ok}枚 追加しました`);
+  else if (ok && fail) toast(`${ok}枚追加・${fail}枚は取り込めませんでした`);
+  else if (fail) toast(`写真を取り込めませんでした（形式かサイズを確認）`);
 }
 
 async function saveFromForm(e) {
@@ -232,6 +323,17 @@ async function saveFromForm(e) {
     updatedAt: Date.now(),
   };
   await dbPut('restaurants', rec);
+
+  // 写真の反映：削除 → 追加
+  for (const delId of state.form.removed) await dbDelete('photos', delId);
+  for (const p of state.form.photos) {
+    if (!p.dbId) {
+      await dbPut('photos', { id: p.key, restaurantId: id, blob: p.blob, createdAt: Date.now() });
+    }
+  }
+  state.form.photos = [];
+  state.form.removed = [];
+
   hideModal('#editModal');
   await loadAll();
   toast(existing ? '保存しました' : '追加しました');
@@ -250,7 +352,7 @@ async function deleteCurrent() {
   toast('削除しました');
 }
 
-/* ---------- 詳細モーダル ---------- */
+/* ---------- 詳細（見るだけ） ---------- */
 async function openDetail(id) {
   const r = state.restaurants.find((x) => x.id === id);
   if (!r) return;
@@ -261,70 +363,29 @@ async function openDetail(id) {
   badge.textContent = r.status === 'visited' ? '行った' : '行きたい';
   const pref = $('#d_pref');
   pref.textContent = r.prefecture || '未設定';
-  pref.hidden = false;
   const urlEl = $('#d_url');
   if (r.url) { urlEl.href = r.url; urlEl.hidden = false; } else { urlEl.hidden = true; }
   $('#d_memo').textContent = r.memo || '';
   $('#toggleStatusBtn').textContent = r.status === 'visited' ? '「行きたい」に戻す' : '「行った」にする';
-  await renderPhotos(id);
+  await renderDetailPhotos(id);
   showModal('#detailModal');
 }
 
-async function renderPhotos(id) {
+async function renderDetailPhotos(id) {
+  const oldUrls = [..._viewUrls]; _viewUrls.clear();
   const grid = $('#photoGrid');
   grid.innerHTML = '';
   const photos = (await dbGetByIndex('photos', 'byRestaurant', id)).sort((a, b) => a.createdAt - b.createdAt);
-  $('#d_photocount').textContent = `(${photos.length}/${MAX_PHOTOS})`;
+  $('#d_photocount').textContent = photos.length ? `(${photos.length})` : '（なし）';
   for (const p of photos) {
     const cell = document.createElement('div');
     cell.className = 'photo-cell';
     const im = document.createElement('img');
-    im.src = objURL(p.blob); im.alt = '';
-    im.loading = 'lazy';
-    const del = document.createElement('button');
-    del.className = 'photo-del';
-    del.textContent = '✕';
-    del.setAttribute('aria-label', '写真を削除');
-    del.addEventListener('click', async (ev) => {
-      ev.stopPropagation();
-      await dbDelete('photos', p.id);
-      await renderPhotos(id);
-      await refreshCountsFor(id);
-      toast('写真を削除しました');
-    });
+    im.src = viewURL(p.blob); im.alt = '';
     cell.appendChild(im);
-    cell.appendChild(del);
     grid.appendChild(cell);
   }
-}
-
-async function refreshCountsFor() {
-  // 一覧のサムネ/枚数を最新化（詳細から戻る前提で全体再読込）
-  await loadAll();
-}
-
-async function addPhotos(files) {
-  const id = state.currentId;
-  if (!id) return;
-  const current = (await dbGetByIndex('photos', 'byRestaurant', id)).length;
-  const room = MAX_PHOTOS - current;
-  if (room <= 0) { toast(`写真は${MAX_PHOTOS}枚までです`); return; }
-  const list = Array.from(files).slice(0, room);
-  if (files.length > room) toast(`残り${room}枚だけ追加しました`);
-  let ok = 0;
-  for (const file of list) {
-    if (!file.type.startsWith('image/')) continue;
-    try {
-      const blob = await resizeImage(file);
-      await dbPut('photos', { id: uid(), restaurantId: id, blob, createdAt: Date.now() });
-      ok++;
-    } catch (err) {
-      console.error('写真の処理に失敗', err);
-    }
-  }
-  await renderPhotos(id);
-  await refreshCountsFor(id);
-  if (ok) toast(`${ok}枚 追加しました`);
+  oldUrls.forEach((u) => URL.revokeObjectURL(u));
 }
 
 async function toggleStatus() {
@@ -333,8 +394,8 @@ async function toggleStatus() {
   r.status = r.status === 'visited' ? 'want' : 'visited';
   r.updatedAt = Date.now();
   await dbPut('restaurants', r);
-  await openDetail(r.id);
   await loadAll();
+  await openDetail(r.id);
 }
 
 /* ---------- エクスポート / インポート ---------- */
@@ -398,7 +459,11 @@ async function updateMenuStat() {
 
 /* ---------- モーダル制御 ---------- */
 function showModal(sel) { $(sel).hidden = false; document.body.style.overflow = 'hidden'; }
-function hideModal(sel) { $(sel).hidden = true; document.body.style.overflow = ''; }
+function hideModal(sel) {
+  $(sel).hidden = true;
+  document.body.style.overflow = '';
+  if (sel === '#editModal' || sel === '#detailModal') revokeViewURLs();
+}
 
 /* ---------- 初期化 ---------- */
 function initPrefOptions() {
@@ -417,6 +482,7 @@ function bindEvents() {
   $('#fab').addEventListener('click', () => openEdit(null));
   $('#editForm').addEventListener('submit', saveFromForm);
   $('#deleteBtn').addEventListener('click', deleteCurrent);
+  $('#f_photoInput').addEventListener('change', (e) => { addFormPhotos(e.target.files); e.target.value = ''; });
 
   $('#statusTabs').addEventListener('click', (e) => {
     const btn = e.target.closest('.tab'); if (!btn) return;
@@ -427,7 +493,6 @@ function bindEvents() {
   });
   $('#prefFilter').addEventListener('change', (e) => { state.filterPref = e.target.value; render(); });
 
-  $('#photoInput').addEventListener('change', (e) => { addPhotos(e.target.files); e.target.value = ''; });
   $('#toggleStatusBtn').addEventListener('click', toggleStatus);
   $('#editFromDetailBtn').addEventListener('click', () => {
     const r = state.restaurants.find((x) => x.id === state.currentId);
@@ -439,7 +504,6 @@ function bindEvents() {
   $('#exportBtn').addEventListener('click', exportData);
   $('#importInput').addEventListener('change', (e) => { if (e.target.files[0]) importData(e.target.files[0]); e.target.value = ''; });
 
-  // 閉じるボタン & 背景タップ
   document.querySelectorAll('[data-close]').forEach((b) =>
     b.addEventListener('click', (e) => hideModal('#' + e.target.closest('.modal').id))
   );
