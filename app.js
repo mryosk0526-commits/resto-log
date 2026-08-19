@@ -249,12 +249,13 @@ function renderFormPhotos() {
     cell.className = 'photo-cell';
     const im = document.createElement('img');
     im.src = viewURL(p.blob); im.alt = '';
+    im.addEventListener('click', () => openLightbox(p.blob));
     const del = document.createElement('button');
     del.type = 'button';
     del.className = 'photo-del';
     del.textContent = '✕';
     del.setAttribute('aria-label', '写真を外す');
-    del.addEventListener('click', () => removeFormPhoto(idx));
+    del.addEventListener('click', (ev) => { ev.stopPropagation(); removeFormPhoto(idx); });
     cell.appendChild(im);
     cell.appendChild(del);
     grid.appendChild(cell);
@@ -382,6 +383,7 @@ async function renderDetailPhotos(id) {
     cell.className = 'photo-cell';
     const im = document.createElement('img');
     im.src = viewURL(p.blob); im.alt = '';
+    im.addEventListener('click', () => openLightbox(p.blob));
     cell.appendChild(im);
     grid.appendChild(cell);
   }
@@ -396,6 +398,97 @@ async function toggleStatus() {
   await dbPut('restaurants', r);
   await loadAll();
   await openDetail(r.id);
+}
+
+/* ---------- 写真の拡大表示（ピンチ/パン/ダブルタップ） ---------- */
+const lb = {
+  scale: 1, tx: 0, ty: 0, url: null,
+  startDist: 0, startScale: 1, startTx: 0, startTy: 0,
+  panX: 0, panY: 0, lastTap: 0, moved: false, downOnImage: false,
+};
+
+function applyLb() {
+  $('#lightboxImg').style.transform = `translate(${lb.tx}px, ${lb.ty}px) scale(${lb.scale})`;
+}
+
+function openLightbox(blob) {
+  const box = $('#lightbox');
+  const img = $('#lightboxImg');
+  if (lb.url) URL.revokeObjectURL(lb.url);
+  lb.url = URL.createObjectURL(blob);
+  img.src = lb.url;
+  lb.scale = 1; lb.tx = 0; lb.ty = 0;
+  applyLb();
+  box.hidden = false;
+  document.body.style.overflow = 'hidden';
+}
+
+function closeLightbox() {
+  const box = $('#lightbox');
+  const img = $('#lightboxImg');
+  box.hidden = true;
+  img.src = '';
+  if (lb.url) { URL.revokeObjectURL(lb.url); lb.url = null; }
+  // 背後にモーダルがある場合は overflow:hidden を維持
+  if ($('#detailModal').hidden && $('#editModal').hidden && $('#menuModal').hidden) {
+    document.body.style.overflow = '';
+  }
+}
+
+function touchDist(t) {
+  return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+}
+
+function bindLightbox() {
+  const box = $('#lightbox');
+  $('#lightboxClose').addEventListener('click', closeLightbox);
+
+  box.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) {
+      lb.startDist = touchDist(e.touches);
+      lb.startScale = lb.scale;
+      lb.moved = true;
+    } else if (e.touches.length === 1) {
+      lb.moved = false;
+      lb.downOnImage = (e.target && e.target.id === 'lightboxImg');
+      lb.panX = e.touches[0].clientX; lb.panY = e.touches[0].clientY;
+      lb.startTx = lb.tx; lb.startTy = lb.ty;
+    }
+  }, { passive: false });
+
+  box.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    if (e.touches.length === 2) {
+      const d = touchDist(e.touches);
+      if (lb.startDist > 0) lb.scale = Math.min(5, Math.max(1, lb.startScale * (d / lb.startDist)));
+      applyLb();
+    } else if (e.touches.length === 1) {
+      const dx = e.touches[0].clientX - lb.panX;
+      const dy = e.touches[0].clientY - lb.panY;
+      if (Math.abs(dx) > 6 || Math.abs(dy) > 6) lb.moved = true;
+      if (lb.scale > 1) { lb.tx = lb.startTx + dx; lb.ty = lb.startTy + dy; applyLb(); }
+    }
+  }, { passive: false });
+
+  box.addEventListener('touchend', (e) => {
+    if (e.touches.length > 0) return;
+    if (lb.scale <= 1.02) { lb.scale = 1; lb.tx = 0; lb.ty = 0; applyLb(); }
+    if (lb.moved) return;
+    const now = Date.now();
+    if (now - lb.lastTap < 300 && lb.downOnImage) {
+      // 画像をダブルタップ → ズーム切替
+      if (lb.scale > 1) { lb.scale = 1; lb.tx = 0; lb.ty = 0; } else { lb.scale = 2.5; }
+      applyLb();
+      lb.lastTap = 0;
+    } else {
+      lb.lastTap = now;
+      // 画像の外（空いた所）を単タップ → 閉じる
+      if (!lb.downOnImage) closeLightbox();
+    }
+  });
+
+  // PC（マウス）：背景クリックで閉じる
+  box.addEventListener('mousedown', (e) => { if (e.target === box) closeLightbox(); });
 }
 
 /* ---------- エクスポート / インポート ---------- */
@@ -479,6 +572,7 @@ function initPrefOptions() {
 }
 
 function bindEvents() {
+  bindLightbox();
   $('#fab').addEventListener('click', () => openEdit(null));
   $('#editForm').addEventListener('submit', saveFromForm);
   $('#deleteBtn').addEventListener('click', deleteCurrent);

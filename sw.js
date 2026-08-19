@@ -2,7 +2,7 @@
    方針: ネット優先(network-first)。オンラインなら常に最新を配信し、
    オフラインのときだけキャッシュにフォールバック（＝更新が必ず届く）。
    データ本体は IndexedDB 側にあり、ここではアプリ本体のみ扱う。 */
-const CACHE = 'resto-log-v4';
+const CACHE = 'resto-log-v5';
 const SHELL = [
   './',
   './index.html',
