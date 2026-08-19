@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#c0392b" />
+  <title>食べ歩きメモ</title>
+
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="食べ歩きメモ" />
+
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- ===== ヘッダー ===== -->
+  <header class="app-header">
+    <h1 class="app-title">🍜 食べ歩きメモ</h1>
+    <div class="header-actions">
+      <button id="menuBtn" class="icon-btn" aria-label="メニュー">⋯</button>
+    </div>
+  </header>
+
+  <!-- ===== フィルタバー ===== -->
+  <div class="filterbar">
+    <div class="tabs" id="statusTabs">
+      <button class="tab is-active" data-status="all">すべて</button>
+      <button class="tab" data-status="want">行きたい</button>
+      <button class="tab" data-status="visited">行った</button>
+    </div>
+    <select id="prefFilter" class="pref-filter" aria-label="都道府県で絞る">
+      <option value="">全国</option>
+    </select>
+  </div>
+
+  <!-- ===== リスト ===== -->
+  <main class="list" id="list"></main>
+
+  <!-- ===== 空状態 ===== -->
+  <div class="empty" id="emptyState" hidden>
+    <div class="empty-emoji">🍽️</div>
+    <p class="empty-text">まだ店がありません</p>
+    <p class="empty-sub">右下の ＋ から、行きたい店を追加してみよう</p>
+  </div>
+
+  <!-- ===== 追加ボタン ===== -->
+  <button id="fab" class="fab" aria-label="店を追加">＋</button>
+
+  <!-- ===== 追加/編集モーダル ===== -->
+  <div class="modal" id="editModal" hidden>
+    <div class="modal-sheet">
+      <div class="modal-head">
+        <h2 id="editTitle">店を追加</h2>
+        <button class="icon-btn" data-close aria-label="閉じる">✕</button>
+      </div>
+      <form id="editForm" class="form">
+        <input type="hidden" id="f_id" />
+        <label class="field">
+          <span class="label">店名 <em>*</em></span>
+          <input type="text" id="f_name" required placeholder="例）餃子の王将 三宮店" />
+        </label>
+        <label class="field">
+          <span class="label">都道府県</span>
+          <select id="f_pref"></select>
+        </label>
+        <label class="field">
+          <span class="label">URL（食べログ等）</span>
+          <input type="url" id="f_url" inputmode="url" placeholder="https://..." />
+        </label>
+        <label class="field">
+          <span class="label">メモ</span>
+          <textarea id="f_memo" rows="2" placeholder="気になる一品・営業時間・同行者など"></textarea>
+        </label>
+        <fieldset class="field seg">
+          <span class="label">状態</span>
+          <div class="segmented">
+            <label><input type="radio" name="f_status" value="want" checked /><span>行きたい</span></label>
+            <label><input type="radio" name="f_status" value="visited" /><span>行った</span></label>
+          </div>
+        </fieldset>
+        <div class="form-actions">
+          <button type="button" class="btn ghost danger" id="deleteBtn" hidden>削除</button>
+          <button type="submit" class="btn primary">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===== 詳細モーダル ===== -->
+  <div class="modal" id="detailModal" hidden>
+    <div class="modal-sheet">
+      <div class="modal-head">
+        <h2 id="d_name">店名</h2>
+        <button class="icon-btn" data-close aria-label="閉じる">✕</button>
+      </div>
+      <div class="detail-body">
+        <div class="detail-meta">
+          <span class="badge" id="d_status"></span>
+          <span class="chip" id="d_pref"></span>
+        </div>
+        <a id="d_url" class="detail-url" href="#" target="_blank" rel="noopener" hidden>🔗 リンクを開く</a>
+        <p id="d_memo" class="detail-memo"></p>
+
+        <div class="photos-head">
+          <span class="label">写真 <small id="d_photocount"></small></span>
+          <label class="btn small">
+            ＋ 追加
+            <input type="file" id="photoInput" accept="image/*" multiple hidden />
+          </label>
+        </div>
+        <div class="photo-grid" id="photoGrid"></div>
+        <p class="hint" id="photoHint">写真は自動で軽く圧縮して保存します（最大10枚）</p>
+
+        <div class="detail-actions">
+          <button class="btn ghost" id="toggleStatusBtn"></button>
+          <button class="btn ghost" id="editFromDetailBtn">編集</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== メニュー（エクスポート/インポート） ===== -->
+  <div class="modal" id="menuModal" hidden>
+    <div class="modal-sheet compact">
+      <div class="modal-head">
+        <h2>データ管理</h2>
+        <button class="icon-btn" data-close aria-label="閉じる">✕</button>
+      </div>
+      <div class="menu-list">
+        <button class="menu-item" id="exportBtn">
+          <span class="menu-emoji">📤</span>
+          <span><b>バックアップを書き出す</b><small>機種変・データ消え対策（必ず定期的に）</small></span>
+        </button>
+        <label class="menu-item">
+          <span class="menu-emoji">📥</span>
+          <span><b>バックアップを読み込む</b><small>書き出したファイルから復元</small></span>
+          <input type="file" id="importInput" accept="application/json,.json" hidden />
+        </label>
+        <div class="menu-stat" id="menuStat"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== トースト ===== -->
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
