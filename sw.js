@@ -1,5 +1,8 @@
-/* 食べ歩きメモ — Service Worker (アプリ本体のみキャッシュ / データはIndexedDB) */
-const CACHE = 'resto-log-v2';
+/* 食べ歩きメモ — Service Worker
+   方針: ネット優先(network-first)。オンラインなら常に最新を配信し、
+   オフラインのときだけキャッシュにフォールバック（＝更新が必ず届く）。
+   データ本体は IndexedDB 側にあり、ここではアプリ本体のみ扱う。 */
+const CACHE = 'resto-log-v3';
 const SHELL = [
   './',
   './index.html',
@@ -24,19 +27,19 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const { request } = e;
   if (request.method !== 'GET') return;
-  // アプリ本体は cache-first、その他はネット優先でフォールバック
+  const sameOrigin = new URL(request.url).origin === location.origin;
+  if (!sameOrigin) return; // 外部リソースは素通り
+
+  // ネット優先: まず取りに行き、成功したらキャッシュも更新。失敗時のみキャッシュを返す
   e.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached;
-      return fetch(request)
-        .then((res) => {
-          if (res.ok && new URL(request.url).origin === location.origin) {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(request, copy));
-          }
-          return res;
-        })
-        .catch(() => cached);
-    })
+    fetch(request)
+      .then((res) => {
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(request, copy));
+        }
+        return res;
+      })
+      .catch(() => caches.match(request).then((cached) => cached || caches.match('./index.html')))
   );
 });
