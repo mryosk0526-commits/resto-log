@@ -81,6 +81,10 @@
             <label><input type="radio" name="f_status" value="visited" /><span>行った</span></label>
           </div>
         </fieldset>
+        <label class="field">
+          <span class="label">日付 <small id="f_dateNote"></small></span>
+          <input type="date" id="f_date" />
+        </label>
         <fieldset class="field">
           <span class="label">写真 <small id="f_photocount"></small></span>
           <div class="photo-grid" id="f_photoGrid"></div>
@@ -109,6 +113,7 @@
         <div class="detail-meta">
           <span class="badge" id="d_status"></span>
           <span class="chip" id="d_pref"></span>
+          <span class="chip" id="d_date"></span>
         </div>
         <a id="d_url" class="detail-url" href="#" target="_blank" rel="noopener" hidden>🔗 リンクを開く</a>
         <p id="d_memo" class="detail-memo"></p>

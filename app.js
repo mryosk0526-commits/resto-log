@@ -113,6 +113,93 @@ async function resizeImage(file) {
   return blob;
 }
 
+/* ---------- 日付ユーティリティ ---------- */
+function dateToStr(ts) {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+const todayStr = () => dateToStr(Date.now());
+// 表示用: 'YYYY-MM-DD' -> 'YYYY/MM/DD'（無ければ登録日から）
+function displayDate(r) {
+  const s = (r && r.date) || (r && dateToStr(r.createdAt)) || '';
+  return s ? s.replace(/-/g, '/') : '';
+}
+
+/* ---------- EXIF: 写真の撮影日を読む（元ファイルから・ベストエフォート） ----------
+   ※アプリ内で圧縮するとEXIFは消えるので、取り込み時に"元ファイル"から読む。
+     スクショや一部の経路の写真は撮影日を持たない＝取れないこともある（その時はnull）。 */
+async function readExifDate(file) {
+  try {
+    if (!file || !file.type || file.type.indexOf('jpeg') === -1) {
+      // JPEG以外（HEIC/PNG等）はこの簡易パーサでは非対応
+      return null;
+    }
+    const buf = await file.slice(0, 256 * 1024).arrayBuffer();
+    const view = new DataView(buf);
+    const len = view.byteLength;
+    if (len < 4 || view.getUint16(0) !== 0xFFD8) return null; // JPEGでない
+
+    let offset = 2;
+    while (offset + 4 < len) {
+      const marker = view.getUint16(offset);
+      if ((marker & 0xFF00) !== 0xFF00) break;
+      const size = view.getUint16(offset + 2);
+      if (marker === 0xFFE1) { // APP1
+        // "Exif\0\0" ?
+        if (offset + 10 <= len && view.getUint32(offset + 4) === 0x45786966) {
+          return parseExifDate(view, offset + 10, len);
+        }
+      }
+      if (marker === 0xFFDA) break; // 画像データ開始＝これ以降にEXIFは無い
+      offset += 2 + size;
+    }
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function parseExifDate(view, tiff, len) {
+  try {
+    const le = view.getUint16(tiff) === 0x4949; // 'II'=little / 'MM'=big
+    const g16 = (o) => view.getUint16(o, le);
+    const g32 = (o) => view.getUint32(o, le);
+    const readAscii = (o, n) => {
+      let s = '';
+      for (let i = 0; i < n && o + i < len; i++) {
+        const c = view.getUint8(o + i);
+        if (c === 0) break;
+        s += String.fromCharCode(c);
+      }
+      return s;
+    };
+    const scanIFD = (ifd) => {
+      const out = { exifPtr: 0, dt0132: '', dt9003: '' };
+      if (ifd + 2 > len) return out;
+      const n = g16(ifd);
+      for (let i = 0; i < n; i++) {
+        const e = ifd + 2 + i * 12;
+        if (e + 12 > len) break;
+        const tag = g16(e);
+        if (tag === 0x8769) out.exifPtr = tiff + g32(e + 8);           // Exif sub-IFD
+        else if (tag === 0x0132) out.dt0132 = readAscii(tiff + g32(e + 8), 19); // DateTime
+        else if (tag === 0x9003) out.dt9003 = readAscii(tiff + g32(e + 8), 19); // DateTimeOriginal
+      }
+      return out;
+    };
+    const ifd0 = tiff + g32(tiff + 4);
+    const a = scanIFD(ifd0);
+    let dt = a.dt9003;
+    if (a.exifPtr) { const b = scanIFD(a.exifPtr); if (b.dt9003) dt = b.dt9003; }
+    if (!dt) dt = a.dt0132;
+    const m = dt && dt.match(/^(\d{4}):(\d{2}):(\d{2})/);
+    return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 /* ---------- 状態 ---------- */
 const state = {
   restaurants: [],
@@ -122,7 +209,7 @@ const state = {
   filterPref: '',
   currentId: null,   // 詳細表示中の店id
   // 編集フォームの写真ステージング
-  form: { photos: [], removed: [] }, // photos: {key, blob, dbId|null}
+  form: { photos: [], removed: [], dateManual: false }, // photos: {key, blob, dbId|null}
 };
 
 /* ---------- 読み込み & 一覧描画 ---------- */
@@ -227,6 +314,11 @@ async function openEdit(r) {
   document.querySelector(`input[name=f_status][value=${st}]`).checked = true;
   $('#deleteBtn').hidden = !r;
 
+  // 日付: 既存店はその日付（無ければ登録日）、新規は今日
+  $('#f_date').value = r ? ((r.date) || dateToStr(r.createdAt)) : todayStr();
+  $('#f_dateNote').textContent = '';
+  state.form.dateManual = !!r; // 既存は"設定済み"扱い（写真日時で勝手に上書きしない）
+
   // 写真ステージングを初期化（既存店なら現在の写真を読み込む）
   state.form.photos = [];
   state.form.removed = [];
@@ -278,6 +370,7 @@ function removeFormPhoto(idx) {
 async function addFormPhotos(files) {
   const room = MAX_PHOTOS - state.form.photos.length;
   if (room <= 0) { toast(`写真は${MAX_PHOTOS}枚までです`); return; }
+  const wasEmpty = state.form.photos.length === 0; // 1枚目かどうか
   const picked = Array.from(files).slice(0, room);
   if (files.length > room) toast(`残り${room}枚だけ追加できます`);
 
@@ -285,6 +378,12 @@ async function addFormPhotos(files) {
   const original = label.textContent;
   label.textContent = '処理中…';
   $('.photo-add').classList.add('busy');
+
+  // 1枚目の写真から撮影日を読み取り（日付が手動設定でなければ自動セット）
+  let exifDate = null;
+  if (wasEmpty && picked[0] && !state.form.dateManual) {
+    exifDate = await readExifDate(picked[0]);
+  }
 
   let ok = 0, fail = 0;
   for (const file of picked) {
@@ -296,6 +395,11 @@ async function addFormPhotos(files) {
       console.error('写真の処理に失敗', file && file.name, err);
       fail++;
     }
+  }
+
+  if (exifDate && !state.form.dateManual) {
+    $('#f_date').value = exifDate;
+    $('#f_dateNote').textContent = '📷 写真の撮影日';
   }
 
   label.textContent = original;
@@ -320,6 +424,7 @@ async function saveFromForm(e) {
     url: $('#f_url').value.trim(),
     memo: $('#f_memo').value.trim(),
     status: document.querySelector('input[name=f_status]:checked').value,
+    date: $('#f_date').value || (existing && existing.date) || todayStr(),
     createdAt: existing ? existing.createdAt : Date.now(),
     updatedAt: Date.now(),
   };
@@ -364,6 +469,9 @@ async function openDetail(id) {
   badge.textContent = r.status === 'visited' ? '行った' : '行きたい';
   const pref = $('#d_pref');
   pref.textContent = r.prefecture || '未設定';
+  const dateEl = $('#d_date');
+  const ds = displayDate(r);
+  if (ds) { dateEl.textContent = '📅 ' + ds; dateEl.hidden = false; } else { dateEl.hidden = true; }
   const urlEl = $('#d_url');
   if (r.url) { urlEl.href = r.url; urlEl.hidden = false; } else { urlEl.hidden = true; }
   $('#d_memo').textContent = r.memo || '';
@@ -627,6 +735,7 @@ function bindEvents() {
   $('#editForm').addEventListener('submit', saveFromForm);
   $('#deleteBtn').addEventListener('click', deleteCurrent);
   $('#f_photoInput').addEventListener('change', (e) => { addFormPhotos(e.target.files); e.target.value = ''; });
+  $('#f_date').addEventListener('input', () => { state.form.dateManual = true; $('#f_dateNote').textContent = ''; });
 
   $('#statusTabs').addEventListener('click', (e) => {
     const btn = e.target.closest('.tab'); if (!btn) return;
