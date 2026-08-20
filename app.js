@@ -27,26 +27,22 @@ const GENRES = [
   'ファストフード', 'スイーツ', 'バー', 'その他',
 ];
 
-// 全国制覇: 都道府県タイルの配置（[列,行]・日本の形を模した並び）と地方区分
+// 全国制覇: 都道府県タイルの配置（[列,行]・日本の形を模した並び／北陸も穴なし）と地方区分
 const TILE_POS = {
   '北海道': [12, 0],
-  '青森県': [11, 2], '秋田県': [10, 3], '岩手県': [11, 3], '山形県': [10, 4], '宮城県': [11, 4], '福島県': [11, 5],
-  '新潟県': [10, 5], '富山県': [9, 5], '石川県': [8, 5], '福井県': [8, 6],
-  '群馬県': [10, 6], '栃木県': [11, 6], '茨城県': [12, 6],
-  '長野県': [10, 7], '岐阜県': [9, 7], '埼玉県': [11, 7], '千葉県': [12, 7],
-  '愛知県': [9, 8], '山梨県': [10, 8], '東京都': [11, 8],
-  '静岡県': [10, 9], '神奈川県': [11, 9],
-  '滋賀県': [8, 7], '京都府': [7, 7], '兵庫県': [6, 7],
-  '大阪府': [7, 8], '奈良県': [8, 8], '三重県': [9, 9],
-  '和歌山県': [7, 9],
-  '鳥取県': [6, 6], '島根県': [5, 6], '岡山県': [5, 7], '広島県': [4, 7], '山口県': [3, 7],
-  '香川県': [6, 8], '徳島県': [6, 9], '愛媛県': [5, 8], '高知県': [5, 9],
-  '福岡県': [3, 8], '佐賀県': [2, 8], '長崎県': [1, 8], '熊本県': [2, 9], '大分県': [3, 9], '宮崎県': [3, 10], '鹿児島県': [2, 10],
+  '青森県': [11, 1],
+  '秋田県': [10, 2], '岩手県': [11, 2],
+  '山形県': [10, 3], '宮城県': [11, 3],
+  '石川県': [8, 4], '富山県': [9, 4], '新潟県': [10, 4], '福島県': [11, 4],
+  '福井県': [8, 5], '岐阜県': [9, 5], '長野県': [10, 5], '群馬県': [11, 5], '栃木県': [12, 5], '茨城県': [13, 5],
+  '島根県': [5, 6], '鳥取県': [6, 6], '京都府': [7, 6], '滋賀県': [8, 6], '愛知県': [9, 6], '山梨県': [10, 6], '埼玉県': [11, 6], '東京都': [12, 6], '千葉県': [13, 6],
+  '長崎県': [0, 7], '佐賀県': [1, 7], '福岡県': [2, 7], '山口県': [3, 7], '広島県': [4, 7], '岡山県': [5, 7], '兵庫県': [6, 7], '大阪府': [7, 7], '奈良県': [8, 7], '三重県': [9, 7], '静岡県': [10, 7], '神奈川県': [11, 7],
+  '熊本県': [1, 8], '大分県': [2, 8], '愛媛県': [4, 8], '香川県': [5, 8], '徳島県': [6, 8], '和歌山県': [7, 8],
+  '鹿児島県': [1, 9], '宮崎県': [2, 9], '高知県': [5, 9],
   '沖縄県': [0, 11],
 };
 const REGIONS = {
-  '北海道': ['北海道'],
-  '東北': ['青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県'],
+  '北海道・東北': ['北海道', '青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県'],
   '関東': ['茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '東京都', '神奈川県'],
   '中部': ['新潟県', '富山県', '石川県', '福井県', '山梨県', '長野県', '岐阜県', '静岡県', '愛知県'],
   '近畿': ['三重県', '滋賀県', '京都府', '大阪府', '兵庫県', '奈良県', '和歌山県'],
@@ -260,8 +256,10 @@ const state = {
   filterStatus: 'all',
   filterPref: '',
   filterGenre: '',
+  filterRegion: '',  // 地方でまとめて絞り込み（全国制覇から）
   sortMode: 'reg',   // reg / date_desc / date_asc / pref / genre
   currentGroupId: null, // 詳細表示中のグループid
+  filterBeforeConquest: null, // 制覇画面に入る前のフィルタ（閉じたら戻す）
   // 編集フォームの写真ステージング
   form: { photos: [], removed: [], dateManual: false }, // photos: {key, blob, dbId|null}
 };
@@ -365,9 +363,15 @@ function render() {
 
   let groups = buildGroups();
   if (state.filterStatus !== 'all') groups = groups.filter((g) => g.status === state.filterStatus);
-  if (state.filterPref) groups = groups.filter((g) => g.prefecture === state.filterPref);
+  if (state.filterRegion && REGIONS[state.filterRegion]) {
+    const set = REGIONS[state.filterRegion];
+    groups = groups.filter((g) => set.includes(g.prefecture));
+  } else if (state.filterPref) {
+    groups = groups.filter((g) => g.prefecture === state.filterPref);
+  }
   if (state.filterGenre) groups = groups.filter((g) => g.genre === state.filterGenre);
   sortGroups(groups);
+  updateActiveFilterBar();
 
   $('#emptyState').hidden = groups.length !== 0;
   for (const g of groups) list.appendChild(buildCard(g));
@@ -899,6 +903,13 @@ function conquestByPref() {
 const prefState = (info) => (info.visited ? 'visited' : (info.want ? 'want' : 'none'));
 
 function openConquest() {
+  // 制覇に入る前のフィルタを覚えておく（閉じたら戻すため・初回のみ）
+  if (!state.filterBeforeConquest) {
+    state.filterBeforeConquest = {
+      pref: state.filterPref, region: state.filterRegion,
+      genre: state.filterGenre, status: state.filterStatus, sort: state.sortMode,
+    };
+  }
   const info = conquestByPref();
   const conquered = PREFECTURES.filter((p) => info[p].visited).length;
   $('#cq_count').textContent = conquered;
@@ -944,6 +955,7 @@ function openConquest() {
     const nm = document.createElement('span'); nm.className = 'cq-region-name'; nm.textContent = region;
     const sc = document.createElement('span'); sc.className = 'cq-region-score'; sc.textContent = `${done}/${prefs.length}`;
     row.appendChild(nm); row.appendChild(sc);
+    row.addEventListener('click', () => filterToRegion(region));
     rc.appendChild(row);
   }
 
@@ -964,14 +976,52 @@ function setConquestEnabled(on) {
   applyConquestVisibility();
 }
 
+function resetStatusTabTo(status) {
+  state.filterStatus = status;
+  document.querySelectorAll('#statusTabs .tab').forEach((t) => t.classList.toggle('is-active', t.dataset.status === status));
+}
+
 function filterToPref(p) {
+  state.filterRegion = '';
   state.filterPref = p;
   $('#prefFilter').value = p;
-  state.filterStatus = 'all';
-  document.querySelectorAll('#statusTabs .tab').forEach((t) => t.classList.toggle('is-active', t.dataset.status === 'all'));
+  resetStatusTabTo('all');
   render();
   hideModal('#conquestModal');
   toast(p + ' でしぼり込み');
+}
+
+function filterToRegion(region) {
+  state.filterRegion = region;
+  state.filterPref = '';
+  $('#prefFilter').value = '';
+  resetStatusTabTo('all');
+  render();
+  hideModal('#conquestModal');
+  toast(region + ' でしぼり込み');
+}
+
+function updateActiveFilterBar() {
+  const bar = $('#activeFilterBar');
+  if (state.filterRegion) {
+    $('#activeFilterLabel').textContent = '🗾 ' + state.filterRegion + ' で表示中';
+    bar.hidden = false;
+  } else {
+    bar.hidden = true;
+  }
+}
+
+// 制覇画面を閉じたら、入る前のフィルタに戻す
+function restoreFromConquest() {
+  const s = state.filterBeforeConquest;
+  if (s) {
+    state.filterPref = s.pref; state.filterRegion = s.region;
+    state.filterGenre = s.genre; state.sortMode = s.sort;
+    $('#prefFilter').value = s.pref; $('#genreFilter').value = s.genre; $('#sortSelect').value = s.sort;
+    resetStatusTabTo(s.status);
+    render();
+  }
+  state.filterBeforeConquest = null;
 }
 
 /* ---------- エクスポート / インポート ---------- */
@@ -1089,11 +1139,18 @@ function bindEvents() {
     document.querySelectorAll('#statusTabs .tab').forEach((t) => t.classList.remove('is-active'));
     btn.classList.add('is-active');
     state.filterStatus = btn.dataset.status;
+    state.filterBeforeConquest = null; // 手動操作で"戻す"予約は解除
     render();
   });
-  $('#prefFilter').addEventListener('change', (e) => { state.filterPref = e.target.value; render(); });
-  $('#genreFilter').addEventListener('change', (e) => { state.filterGenre = e.target.value; render(); });
-  $('#sortSelect').addEventListener('change', (e) => { state.sortMode = e.target.value; render(); });
+  $('#prefFilter').addEventListener('change', (e) => {
+    state.filterPref = e.target.value; state.filterRegion = ''; // 県指定は地方指定と排他
+    state.filterBeforeConquest = null; render();
+  });
+  $('#genreFilter').addEventListener('change', (e) => { state.filterGenre = e.target.value; state.filterBeforeConquest = null; render(); });
+  $('#sortSelect').addEventListener('change', (e) => { state.sortMode = e.target.value; state.filterBeforeConquest = null; render(); });
+  $('#activeFilterClear').addEventListener('click', () => {
+    state.filterRegion = ''; state.filterBeforeConquest = null; render();
+  });
 
   $('#addVisitBtn').addEventListener('click', addVisitToCurrentGroup);
 
@@ -1104,13 +1161,20 @@ function bindEvents() {
   $('#importInput').addEventListener('change', (e) => { if (e.target.files[0]) importData(e.target.files[0]); e.target.value = ''; });
 
   document.querySelectorAll('[data-close]').forEach((b) =>
-    b.addEventListener('click', (e) => hideModal('#' + e.target.closest('.modal').id))
+    b.addEventListener('click', (e) => {
+      const id = e.target.closest('.modal').id;
+      if (id === 'conquestModal') restoreFromConquest(); // 制覇を閉じたら元のフィルタに戻す
+      hideModal('#' + id);
+    })
   );
   document.querySelectorAll('.modal').forEach((m) =>
     m.addEventListener('click', (e) => {
       // 拡大表示を閉じた直後のタップ貫通では閉じない（保存前の入力を守る）
       if (Date.now() - lb.closedAt < 500) return;
-      if (e.target === m) hideModal('#' + m.id);
+      if (e.target === m) {
+        if (m.id === 'conquestModal') restoreFromConquest();
+        hideModal('#' + m.id);
+      }
     })
   );
 }

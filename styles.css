@@ -276,6 +276,19 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--brand-soft)
 .cq-region-name { color: var(--text); }
 .cq-region-score { font-weight: 700; color: var(--muted); }
 .cq-region.complete .cq-region-score { color: var(--brand); }
+.cq-region { cursor: pointer; }
+.cq-region:active { background: var(--bg); }
+
+/* 絞り込み中バー */
+.active-filter {
+  position: sticky; top: calc(120px + var(--safe-top)); z-index: 14;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin: 10px 16px 0; padding: 8px 14px;
+  background: var(--brand-soft); color: var(--brand);
+  border-radius: 10px; font-size: 13px; font-weight: 600;
+}
+.active-filter[hidden] { display: none; }
+.active-filter button { background: var(--brand); color: #fff; border: none; border-radius: 8px; padding: 5px 12px; font-size: 13px; font-weight: 700; cursor: pointer; }
 
 /* ===== アクション付きトースト ===== */
 .toast-action { margin-left: 12px; background: transparent; border: none; color: #7fd0ff; font-weight: 700; font-size: 14px; cursor: pointer; padding: 0; }

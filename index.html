@@ -49,6 +49,12 @@
     </div>
   </div>
 
+  <!-- ===== 絞り込み中バー（地方など） ===== -->
+  <div class="active-filter" id="activeFilterBar" hidden>
+    <span id="activeFilterLabel"></span>
+    <button id="activeFilterClear">解除</button>
+  </div>
+
   <!-- ===== リスト ===== -->
   <main class="list" id="list"></main>
 
@@ -184,7 +190,7 @@
           <span><i class="lg want"></i>狙い中</span>
           <span><i class="lg none"></i>未開拓</span>
         </div>
-        <div class="cq-map-wrap"><svg id="cq_map" viewBox="0 0 390 360" class="cq-map" xmlns="http://www.w3.org/2000/svg"></svg></div>
+        <div class="cq-map-wrap"><svg id="cq_map" viewBox="0 0 420 360" class="cq-map" xmlns="http://www.w3.org/2000/svg"></svg></div>
         <p class="hint" style="text-align:center">県をタップするとその県の一覧に飛びます</p>
         <div class="cq-regions" id="cq_regions"></div>
       </div>
