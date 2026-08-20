@@ -27,6 +27,35 @@ const GENRES = [
   'ファストフード', 'スイーツ', 'バー', 'その他',
 ];
 
+// 全国制覇: 都道府県タイルの配置（[列,行]・日本の形を模した並び）と地方区分
+const TILE_POS = {
+  '北海道': [12, 0],
+  '青森県': [11, 2], '秋田県': [10, 3], '岩手県': [11, 3], '山形県': [10, 4], '宮城県': [11, 4], '福島県': [11, 5],
+  '新潟県': [10, 5], '富山県': [9, 5], '石川県': [8, 5], '福井県': [8, 6],
+  '群馬県': [10, 6], '栃木県': [11, 6], '茨城県': [12, 6],
+  '長野県': [10, 7], '岐阜県': [9, 7], '埼玉県': [11, 7], '千葉県': [12, 7],
+  '愛知県': [9, 8], '山梨県': [10, 8], '東京都': [11, 8],
+  '静岡県': [10, 9], '神奈川県': [11, 9],
+  '滋賀県': [8, 7], '京都府': [7, 7], '兵庫県': [6, 7],
+  '大阪府': [7, 8], '奈良県': [8, 8], '三重県': [9, 9],
+  '和歌山県': [7, 9],
+  '鳥取県': [6, 6], '島根県': [5, 6], '岡山県': [5, 7], '広島県': [4, 7], '山口県': [3, 7],
+  '香川県': [6, 8], '徳島県': [6, 9], '愛媛県': [5, 8], '高知県': [5, 9],
+  '福岡県': [3, 8], '佐賀県': [2, 8], '長崎県': [1, 8], '熊本県': [2, 9], '大分県': [3, 9], '宮崎県': [3, 10], '鹿児島県': [2, 10],
+  '沖縄県': [0, 11],
+};
+const REGIONS = {
+  '北海道': ['北海道'],
+  '東北': ['青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県'],
+  '関東': ['茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '東京都', '神奈川県'],
+  '中部': ['新潟県', '富山県', '石川県', '福井県', '山梨県', '長野県', '岐阜県', '静岡県', '愛知県'],
+  '近畿': ['三重県', '滋賀県', '京都府', '大阪府', '兵庫県', '奈良県', '和歌山県'],
+  '中国': ['鳥取県', '島根県', '岡山県', '広島県', '山口県'],
+  '四国': ['徳島県', '香川県', '愛媛県', '高知県'],
+  '九州沖縄': ['福岡県', '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県'],
+};
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
 /* ---------- IndexedDB ラッパ ---------- */
 const DB_NAME = 'resto-log';
 const DB_VERSION = 1;
@@ -855,6 +884,82 @@ function bindLightbox() {
   box.addEventListener('mousedown', (e) => { if (e.target === box) closeLightbox(); });
 }
 
+/* ---------- 全国制覇 ---------- */
+function conquestByPref() {
+  const m = {};
+  for (const p of PREFECTURES) m[p] = { visited: false, want: false, count: 0 };
+  for (const r of state.restaurants) {
+    if (!r.prefecture || !m[r.prefecture]) continue;
+    m[r.prefecture].count++;
+    if (r.status === 'visited') m[r.prefecture].visited = true;
+    else m[r.prefecture].want = true;
+  }
+  return m;
+}
+const prefState = (info) => (info.visited ? 'visited' : (info.want ? 'want' : 'none'));
+
+function openConquest() {
+  const info = conquestByPref();
+  const conquered = PREFECTURES.filter((p) => info[p].visited).length;
+  $('#cq_count').textContent = conquered;
+  $('#cq_pct').textContent = `（${Math.round(conquered / 47 * 100)}%）`;
+  $('#cq_barfill').style.width = (conquered / 47 * 100) + '%';
+
+  const CELL = 30;
+  const svg = $('#cq_map');
+  svg.innerHTML = '';
+  for (const p of PREFECTURES) {
+    const pos = TILE_POS[p];
+    if (!pos) continue;
+    const st = prefState(info[p]);
+    const g = document.createElementNS(SVG_NS, 'g');
+    g.setAttribute('class', 'tile tile-' + st);
+    g.setAttribute('transform', `translate(${pos[0] * CELL}, ${pos[1] * CELL})`);
+
+    const rect = document.createElementNS(SVG_NS, 'rect');
+    rect.setAttribute('x', 1); rect.setAttribute('y', 1);
+    rect.setAttribute('width', CELL - 2); rect.setAttribute('height', CELL - 2);
+    rect.setAttribute('rx', 4);
+
+    const t = document.createElementNS(SVG_NS, 'text');
+    t.setAttribute('x', CELL / 2); t.setAttribute('y', CELL / 2);
+    t.setAttribute('text-anchor', 'middle');
+    t.setAttribute('dominant-baseline', 'central');
+    t.textContent = p.slice(0, 2);
+
+    g.appendChild(rect); g.appendChild(t);
+    const title = document.createElementNS(SVG_NS, 'title');
+    title.textContent = `${p}（${st === 'visited' ? '制覇' : st === 'want' ? '狙い中' : '未開拓'}・${info[p].count}件）`;
+    g.appendChild(title);
+    g.addEventListener('click', () => filterToPref(p));
+    svg.appendChild(g);
+  }
+
+  const rc = $('#cq_regions');
+  rc.innerHTML = '';
+  for (const [region, prefs] of Object.entries(REGIONS)) {
+    const done = prefs.filter((p) => info[p].visited).length;
+    const row = document.createElement('div');
+    row.className = 'cq-region' + (done === prefs.length ? ' complete' : '');
+    const nm = document.createElement('span'); nm.className = 'cq-region-name'; nm.textContent = region;
+    const sc = document.createElement('span'); sc.className = 'cq-region-score'; sc.textContent = `${done}/${prefs.length}`;
+    row.appendChild(nm); row.appendChild(sc);
+    rc.appendChild(row);
+  }
+
+  showModal('#conquestModal');
+}
+
+function filterToPref(p) {
+  state.filterPref = p;
+  $('#prefFilter').value = p;
+  state.filterStatus = 'all';
+  document.querySelectorAll('#statusTabs .tab').forEach((t) => t.classList.toggle('is-active', t.dataset.status === 'all'));
+  render();
+  hideModal('#conquestModal');
+  toast(p + ' でしぼり込み');
+}
+
 /* ---------- エクスポート / インポート ---------- */
 function blobToDataURL(blob) {
   return new Promise((res, rej) => {
@@ -978,6 +1083,7 @@ function bindEvents() {
 
   $('#addVisitBtn').addEventListener('click', addVisitToCurrentGroup);
 
+  $('#conquestBtn').addEventListener('click', openConquest);
   $('#menuBtn').addEventListener('click', () => { updateMenuStat(); showModal('#menuModal'); });
   $('#exportBtn').addEventListener('click', exportData);
   $('#importInput').addEventListener('change', (e) => { if (e.target.files[0]) importData(e.target.files[0]); e.target.value = ''; });

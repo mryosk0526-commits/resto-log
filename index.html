@@ -20,6 +20,7 @@
   <header class="app-header">
     <h1 class="app-title">🍜 食べ歩きメモ</h1>
     <div class="header-actions">
+      <button id="conquestBtn" class="icon-btn" aria-label="全国制覇">🗾</button>
       <button id="menuBtn" class="icon-btn" aria-label="メニュー">⋯</button>
     </div>
   </header>
@@ -159,6 +160,28 @@
           <input type="file" id="importInput" accept="application/json,.json" hidden />
         </label>
         <div class="menu-stat" id="menuStat"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 全国制覇 ===== -->
+  <div class="modal" id="conquestModal" hidden>
+    <div class="modal-sheet">
+      <div class="modal-head">
+        <h2>🗾 全国制覇</h2>
+        <button class="icon-btn" data-close aria-label="閉じる">✕</button>
+      </div>
+      <div class="conquest-body">
+        <div class="cq-headline"><span id="cq_count">0</span> / 47 制覇 <small id="cq_pct"></small></div>
+        <div class="cq-bar"><div class="cq-bar-fill" id="cq_barfill"></div></div>
+        <div class="cq-legend">
+          <span><i class="lg visited"></i>制覇</span>
+          <span><i class="lg want"></i>狙い中</span>
+          <span><i class="lg none"></i>未開拓</span>
+        </div>
+        <div class="cq-map-wrap"><svg id="cq_map" viewBox="0 0 390 360" class="cq-map" xmlns="http://www.w3.org/2000/svg"></svg></div>
+        <p class="hint" style="text-align:center">県をタップするとその県の一覧に飛びます</p>
+        <div class="cq-regions" id="cq_regions"></div>
       </div>
     </div>
   </div>

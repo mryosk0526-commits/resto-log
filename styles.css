@@ -248,6 +248,35 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--brand-soft)
 .btn.tiny.ghost { background: var(--surface); color: var(--muted); border: 1px solid var(--line); }
 .add-visit-btn { width: 100%; margin-top: 12px; }
 
+/* ===== 全国制覇 ===== */
+.conquest-body { display: flex; flex-direction: column; gap: 12px; }
+.cq-headline { font-size: 20px; font-weight: 800; text-align: center; }
+.cq-headline small { font-size: 14px; color: var(--muted); font-weight: 600; }
+.cq-bar { height: 10px; background: var(--line); border-radius: 999px; overflow: hidden; }
+.cq-bar-fill { height: 100%; background: var(--brand); border-radius: 999px; transition: width .5s ease; }
+.cq-legend { display: flex; gap: 16px; justify-content: center; font-size: 12px; color: var(--muted); }
+.cq-legend .lg { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+.cq-legend .lg.visited { background: var(--brand); }
+.cq-legend .lg.want { background: var(--want); }
+.cq-legend .lg.none { background: #e6e3df; }
+.cq-map-wrap { overflow-x: auto; }
+.cq-map { width: 100%; max-width: 420px; height: auto; display: block; margin: 0 auto; }
+.cq-map .tile { cursor: pointer; }
+.cq-map .tile rect { stroke: rgba(0,0,0,.06); }
+.cq-map .tile text { font-size: 9px; font-weight: 700; pointer-events: none; }
+.cq-map .tile-visited rect { fill: var(--brand); }
+.cq-map .tile-visited text { fill: #fff; }
+.cq-map .tile-want rect { fill: var(--want); }
+.cq-map .tile-want text { fill: #fff; }
+.cq-map .tile-none rect { fill: #e6e3df; }
+.cq-map .tile-none text { fill: #9a958e; }
+.cq-map .tile:active rect { opacity: .7; }
+.cq-regions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 16px; }
+.cq-region { display: flex; justify-content: space-between; align-items: baseline; padding: 5px 2px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.cq-region-name { color: var(--text); }
+.cq-region-score { font-weight: 700; color: var(--muted); }
+.cq-region.complete .cq-region-score { color: var(--brand); }
+
 /* ===== アクション付きトースト ===== */
 .toast-action { margin-left: 12px; background: transparent; border: none; color: #7fd0ff; font-weight: 700; font-size: 14px; cursor: pointer; padding: 0; }
 
