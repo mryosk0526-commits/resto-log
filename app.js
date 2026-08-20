@@ -28,19 +28,28 @@ const GENRES = [
 ];
 
 // 全国制覇: 都道府県タイルの配置（[列,行]・日本の形を模した並び／北陸も穴なし）と地方区分
+// [x, y, w, h]（w,h省略時1）— 都道府県ごとに大きさ可変のモザイク配置
 const TILE_POS = {
-  '北海道': [12, 0],
-  '青森県': [11, 1],
-  '秋田県': [10, 2], '岩手県': [11, 2],
-  '山形県': [10, 3], '宮城県': [11, 3],
-  '石川県': [8, 4], '富山県': [9, 4], '新潟県': [10, 4], '福島県': [11, 4],
-  '福井県': [8, 5], '岐阜県': [9, 5], '長野県': [10, 5], '群馬県': [11, 5], '栃木県': [12, 5], '茨城県': [13, 5],
-  '島根県': [5, 6], '鳥取県': [6, 6], '京都府': [7, 6], '滋賀県': [8, 6], '愛知県': [9, 6], '山梨県': [10, 6], '埼玉県': [11, 6], '東京都': [12, 6], '千葉県': [13, 6],
-  '山口県': [3, 7], '広島県': [4, 7], '岡山県': [5, 7], '兵庫県': [6, 7], '大阪府': [7, 7], '奈良県': [8, 7], '三重県': [9, 7], '静岡県': [10, 7], '神奈川県': [11, 7],
-  '佐賀県': [0, 8], '福岡県': [1, 8], '大分県': [2, 8], '愛媛県': [4, 8], '香川県': [5, 8], '徳島県': [6, 8], '和歌山県': [7, 8],
-  '長崎県': [0, 9], '熊本県': [1, 9], '宮崎県': [2, 9], '高知県': [5, 9],
-  '鹿児島県': [1, 10],
-  '沖縄県': [0, 11],
+  '北海道': [12, 0, 4, 3],
+  '青森県': [10, 3, 3, 1],
+  '秋田県': [10, 4, 1, 2], '岩手県': [11, 4, 2, 2],
+  '山形県': [10, 6, 1, 2], '宮城県': [11, 6, 2, 2],
+  '福島県': [10, 8, 3, 1],
+  '新潟県': [9, 7, 1, 3],
+  '富山県': [8, 7, 1, 1], '石川県': [7, 7, 1, 2], '福井県': [7, 9, 1, 1],
+  '岐阜県': [8, 8, 1, 3], '長野県': [9, 10, 1, 2],
+  '群馬県': [10, 9, 1, 1], '栃木県': [11, 9, 1, 1], '茨城県': [12, 9, 1, 2],
+  '埼玉県': [10, 10, 2, 1], '東京都': [11, 11, 1, 1], '千葉県': [12, 11, 1, 2],
+  '山梨県': [10, 11, 1, 1], '神奈川県': [10, 12, 2, 1],
+  '愛知県': [8, 11, 1, 1], '静岡県': [8, 12, 2, 1],
+  '京都府': [6, 9, 1, 2], '滋賀県': [7, 10, 1, 1], '三重県': [7, 12, 1, 2],
+  '兵庫県': [5, 9, 1, 2], '大阪府': [6, 11, 1, 1], '奈良県': [7, 11, 1, 1], '和歌山県': [6, 12, 1, 1],
+  '鳥取県': [5, 8, 1, 1], '島根県': [4, 8, 1, 1],
+  '岡山県': [4, 10, 1, 1], '広島県': [3, 10, 1, 1], '山口県': [2, 10, 1, 1],
+  '愛媛県': [4, 12, 1, 1], '香川県': [5, 12, 1, 1], '高知県': [4, 13, 1, 1], '徳島県': [5, 13, 1, 1],
+  '福岡県': [1, 11, 1, 1], '佐賀県': [0, 11, 1, 1], '大分県': [2, 12, 1, 1], '熊本県': [1, 12, 1, 1], '長崎県': [0, 12, 1, 1],
+  '宮崎県': [2, 13, 1, 1], '鹿児島県': [1, 13, 1, 1],
+  '沖縄県': [0, 15, 1, 1],
 };
 const REGIONS = {
   '北海道・東北': ['北海道', '青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県'],
@@ -917,24 +926,33 @@ function openConquest() {
   $('#cq_pct').textContent = `（${Math.round(conquered / 47 * 100)}%）`;
   $('#cq_barfill').style.width = (conquered / 47 * 100) + '%';
 
-  const CELL = 30;
+  const CELL = 28;
   const svg = $('#cq_map');
   svg.innerHTML = '';
+  // 可変サイズ [x,y,w,h] からビューポートを決める
+  let maxX = 0, maxY = 0;
+  for (const p of PREFECTURES) {
+    const t = TILE_POS[p]; if (!t) continue;
+    maxX = Math.max(maxX, t[0] + (t[2] || 1)); maxY = Math.max(maxY, t[1] + (t[3] || 1));
+  }
+  svg.setAttribute('viewBox', `0 0 ${maxX * CELL} ${maxY * CELL}`);
+
   for (const p of PREFECTURES) {
     const pos = TILE_POS[p];
     if (!pos) continue;
+    const [x, y, w = 1, h = 1] = pos;
     const st = prefState(info[p]);
     const g = document.createElementNS(SVG_NS, 'g');
     g.setAttribute('class', 'tile tile-' + st);
-    g.setAttribute('transform', `translate(${pos[0] * CELL}, ${pos[1] * CELL})`);
+    g.setAttribute('transform', `translate(${x * CELL}, ${y * CELL})`);
 
     const rect = document.createElementNS(SVG_NS, 'rect');
     rect.setAttribute('x', 1); rect.setAttribute('y', 1);
-    rect.setAttribute('width', CELL - 2); rect.setAttribute('height', CELL - 2);
+    rect.setAttribute('width', w * CELL - 2); rect.setAttribute('height', h * CELL - 2);
     rect.setAttribute('rx', 4);
 
     const t = document.createElementNS(SVG_NS, 'text');
-    t.setAttribute('x', CELL / 2); t.setAttribute('y', CELL / 2);
+    t.setAttribute('x', w * CELL / 2); t.setAttribute('y', h * CELL / 2);
     t.setAttribute('text-anchor', 'middle');
     t.setAttribute('dominant-baseline', 'central');
     t.textContent = p.slice(0, 2);
