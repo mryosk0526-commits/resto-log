@@ -950,6 +950,20 @@ function openConquest() {
   showModal('#conquestModal');
 }
 
+/* 全国制覇モードの表示ON/OFF（端末ごとの設定・localStorage） */
+const CONQUEST_KEY = 'resto-log-conquest';
+const conquestEnabled = () => localStorage.getItem(CONQUEST_KEY) !== '0'; // 既定ON
+function applyConquestVisibility() {
+  const on = conquestEnabled();
+  $('#conquestBtn').hidden = !on;
+  const toggle = $('#conquestToggle');
+  if (toggle) toggle.checked = on;
+}
+function setConquestEnabled(on) {
+  localStorage.setItem(CONQUEST_KEY, on ? '1' : '0');
+  applyConquestVisibility();
+}
+
 function filterToPref(p) {
   state.filterPref = p;
   $('#prefFilter').value = p;
@@ -1084,7 +1098,8 @@ function bindEvents() {
   $('#addVisitBtn').addEventListener('click', addVisitToCurrentGroup);
 
   $('#conquestBtn').addEventListener('click', openConquest);
-  $('#menuBtn').addEventListener('click', () => { updateMenuStat(); showModal('#menuModal'); });
+  $('#conquestToggle').addEventListener('change', (e) => setConquestEnabled(e.target.checked));
+  $('#menuBtn').addEventListener('click', () => { updateMenuStat(); applyConquestVisibility(); showModal('#menuModal'); });
   $('#exportBtn').addEventListener('click', exportData);
   $('#importInput').addEventListener('change', (e) => { if (e.target.files[0]) importData(e.target.files[0]); e.target.value = ''; });
 
@@ -1104,6 +1119,7 @@ async function init() {
   initPrefOptions();
   initGenreOptions();
   bindEvents();
+  applyConquestVisibility();
   try {
     await loadAll();
   } catch (err) {

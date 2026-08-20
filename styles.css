@@ -292,6 +292,15 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--brand-soft)
 .menu-item b { display: block; font-size: 15px; }
 .menu-item small { display: block; color: var(--muted); font-size: 12px; }
 .menu-stat { text-align: center; color: var(--muted); font-size: 12px; padding: 6px; }
+.toggle-row { cursor: default; }
+.toggle-row .switch { margin-left: auto; flex: none; }
+.switch { position: relative; display: inline-block; width: 46px; height: 27px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch .slider { position: absolute; inset: 0; background: #cfcac3; border-radius: 999px; transition: .2s; cursor: pointer; }
+.switch .slider::before { content: ""; position: absolute; width: 21px; height: 21px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+.switch input:checked + .slider { background: var(--brand); }
+.switch input:checked + .slider::before { transform: translateX(19px); }
+.icon-btn[hidden] { display: none; }
 
 /* ===== 写真の拡大表示 ===== */
 .photo-cell img { cursor: zoom-in; }
