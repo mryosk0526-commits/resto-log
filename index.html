@@ -31,9 +31,21 @@
       <button class="tab" data-status="want">行きたい</button>
       <button class="tab" data-status="visited">行った</button>
     </div>
-    <select id="prefFilter" class="pref-filter" aria-label="都道府県で絞る">
-      <option value="">全国</option>
-    </select>
+    <div class="filter-selects">
+      <select id="prefFilter" class="mini-select" aria-label="都道府県で絞る">
+        <option value="">全国</option>
+      </select>
+      <select id="genreFilter" class="mini-select" aria-label="ジャンルで絞る">
+        <option value="">全ジャンル</option>
+      </select>
+      <select id="sortSelect" class="mini-select" aria-label="並び替え">
+        <option value="reg">登録順</option>
+        <option value="date_desc">日付が新しい順</option>
+        <option value="date_asc">日付が古い順</option>
+        <option value="pref">都道府県順</option>
+        <option value="genre">ジャンル順</option>
+      </select>
+    </div>
   </div>
 
   <!-- ===== リスト ===== -->
@@ -65,6 +77,10 @@
         <label class="field">
           <span class="label">都道府県</span>
           <select id="f_pref"></select>
+        </label>
+        <label class="field">
+          <span class="label">ジャンル</span>
+          <select id="f_genre"></select>
         </label>
         <label class="field">
           <span class="label">URL（食べログ等）</span>
@@ -112,21 +128,15 @@
       <div class="detail-body">
         <div class="detail-meta">
           <span class="badge" id="d_status"></span>
+          <span class="chip" id="d_genre" hidden></span>
           <span class="chip" id="d_pref"></span>
-          <span class="chip" id="d_date"></span>
+          <span class="chip" id="d_count" hidden></span>
         </div>
-        <a id="d_url" class="detail-url" href="#" target="_blank" rel="noopener" hidden>🔗 リンクを開く</a>
-        <p id="d_memo" class="detail-memo"></p>
 
-        <div class="photos-head" id="d_photosHead">
-          <span class="label">写真 <small id="d_photocount"></small></span>
-        </div>
-        <div class="photo-grid view" id="photoGrid"></div>
+        <!-- 訪問（複数回）リスト -->
+        <div class="visits" id="d_visits"></div>
 
-        <div class="detail-actions">
-          <button class="btn ghost" id="toggleStatusBtn"></button>
-          <button class="btn primary" id="editFromDetailBtn">編集</button>
-        </div>
+        <button class="btn ghost add-visit-btn" id="addVisitBtn">＋ もう1回来た（訪問を追加）</button>
       </div>
     </div>
   </div>

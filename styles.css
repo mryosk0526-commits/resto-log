@@ -55,13 +55,14 @@ body {
   top: calc(56px + var(--safe-top));
   z-index: 15;
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   padding: 10px 16px;
   background: var(--bg);
   border-bottom: 1px solid var(--line);
 }
-.tabs { display: flex; gap: 6px; flex: 1; }
+.tabs { display: flex; gap: 6px; }
 .tab {
   flex: 1;
   padding: 7px 6px;
@@ -74,13 +75,14 @@ body {
   white-space: nowrap;
 }
 .tab.is-active { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
-.pref-filter {
-  padding: 7px 10px;
+.filter-selects { display: flex; gap: 6px; }
+.mini-select {
+  flex: 1; min-width: 0;
+  padding: 7px 8px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface);
-  font-size: 13px;
-  max-width: 40%;
+  font-size: 12px;
 }
 
 /* ===== リスト ===== */
@@ -105,6 +107,8 @@ body {
 .card-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .card-body { min-width: 0; flex: 1; }
 .card-name { font-weight: 700; font-size: 16px; margin: 0 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-num { color: var(--muted); font-weight: 600; font-size: 13px; }
+.visit-badge { display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 700; color: var(--brand); background: var(--brand-soft); padding: 1px 7px; border-radius: 999px; vertical-align: middle; }
 .card-sub { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .card-memo { color: var(--muted); font-size: 13px; margin: 6px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -231,6 +235,20 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--brand-soft)
 .hint { font-size: 12px; color: var(--muted); margin: 2px 0 0; }
 .detail-actions { display: flex; gap: 10px; margin-top: 8px; }
 .detail-actions .btn { flex: 1; }
+
+/* ===== 訪問リスト（複数回） ===== */
+.visits { display: flex; flex-direction: column; gap: 12px; }
+.visit { border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px; background: var(--bg); }
+.visit-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.visit-head-left { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.visit-date { font-size: 13px; color: #555; }
+.visit-actions { display: flex; gap: 6px; }
+.btn.tiny { font-size: 12px; padding: 5px 10px; background: var(--brand-soft); color: var(--brand); }
+.btn.tiny.ghost { background: var(--surface); color: var(--muted); border: 1px solid var(--line); }
+.add-visit-btn { width: 100%; margin-top: 12px; }
+
+/* ===== アクション付きトースト ===== */
+.toast-action { margin-left: 12px; background: transparent; border: none; color: #7fd0ff; font-weight: 700; font-size: 14px; cursor: pointer; padding: 0; }
 
 /* ===== メニュー ===== */
 .menu-list { display: flex; flex-direction: column; gap: 8px; }

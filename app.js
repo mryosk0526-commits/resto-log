@@ -20,6 +20,12 @@ const PREFECTURES = [
 const MAX_PHOTOS = 10;
 const MAX_EDGE = 1200;      // 写真の長辺(px) — これ以上は縮小
 const JPEG_QUALITY = 0.8;
+const MAX_STORES = 300;     // 登録上限（重複＝別訪問も1件として数える）
+const GENRES = [
+  'ラーメン', '寿司', '焼肉・肉', '居酒屋', 'カフェ・喫茶', '定食・食堂',
+  'そば・うどん', 'イタリアン', 'フレンチ', '中華', 'カレー',
+  'ファストフード', 'スイーツ', 'バー', 'その他',
+];
 
 /* ---------- IndexedDB ラッパ ---------- */
 const DB_NAME = 'resto-log';
@@ -62,12 +68,20 @@ const dbGetByIndex = (store, index, key) =>
 const $ = (sel) => document.querySelector(sel);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
-function toast(msg) {
+function toast(msg, action) {
   const el = $('#toast');
-  el.textContent = msg;
+  el.innerHTML = '';
+  el.appendChild(document.createTextNode(msg));
+  if (action) {
+    const b = document.createElement('button');
+    b.className = 'toast-action';
+    b.textContent = action.label;
+    b.addEventListener('click', () => { el.hidden = true; clearTimeout(toast._t); action.fn(); });
+    el.appendChild(b);
+  }
   el.hidden = false;
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => { el.hidden = true; }, 2600);
+  toast._t = setTimeout(() => { el.hidden = true; }, action ? 6000 : 2600);
 }
 
 /* ObjectURL 管理：一覧用と表示(詳細/フォーム)用を分離して安全に解放する */
@@ -125,6 +139,14 @@ function displayDate(r) {
   const s = (r && r.date) || (r && dateToStr(r.createdAt)) || '';
   return s ? s.replace(/-/g, '/') : '';
 }
+// 並び替え用の訪問時刻（日付→無ければ登録日時）
+function visitTime(r) {
+  if (r && r.date) { const t = new Date(r.date + 'T00:00:00').getTime(); if (!isNaN(t)) return t; }
+  return (r && r.createdAt) || 0;
+}
+// 同一店の判定キー（店名を正規化 ＋ 都道府県）
+const normName = (s) => (s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+const groupKeyOf = (name, pref) => normName(name) + '|' + (pref || '');
 
 /* ---------- EXIF: 写真の撮影日を読む（元ファイルから・ベストエフォート） ----------
    ※アプリ内で圧縮するとEXIFは消えるので、取り込み時に"元ファイル"から読む。
@@ -205,95 +227,100 @@ const state = {
   restaurants: [],
   photoCounts: {},   // restaurantId -> 枚数
   firstPhoto: {},    // restaurantId -> Blob(先頭写真・サムネ用)
+  regNumbers: {},    // restaurantId -> 登録順番号(1..N・動的)
   filterStatus: 'all',
   filterPref: '',
-  currentId: null,   // 詳細表示中の店id
+  filterGenre: '',
+  sortMode: 'reg',   // reg / date_desc / date_asc / pref / genre
+  currentGroupId: null, // 詳細表示中のグループid
   // 編集フォームの写真ステージング
   form: { photos: [], removed: [], dateManual: false }, // photos: {key, blob, dbId|null}
 };
 
-/* ---------- 読み込み & 一覧描画 ---------- */
+/* ---------- 読み込み ---------- */
 async function loadAll() {
   state.restaurants = await dbGetAll('restaurants');
+
+  // 移行: groupId が無いレコードに付与（店名+都道府県で束ねる／既存の重複も自動でまとまる）
+  const missing = state.restaurants.filter((r) => !r.groupId);
+  if (missing.length) {
+    const keyToGid = {};
+    state.restaurants.forEach((r) => {
+      if (r.groupId) { const k = groupKeyOf(r.name, r.prefecture); if (!keyToGid[k]) keyToGid[k] = r.groupId; }
+    });
+    missing.sort((a, b) => a.createdAt - b.createdAt).forEach((r) => {
+      const k = groupKeyOf(r.name, r.prefecture);
+      if (!keyToGid[k]) keyToGid[k] = r.id;
+      r.groupId = keyToGid[k];
+    });
+    for (const r of missing) await dbPut('restaurants', r);
+  }
+
+  // 登録順ナンバリング（createdAt昇順・動的・欠番なし）
+  state.regNumbers = {};
+  state.restaurants.slice().sort((a, b) => a.createdAt - b.createdAt)
+    .forEach((r, i) => { state.regNumbers[r.id] = i + 1; });
+
+  // 写真: レコードごとの枚数と先頭写真
   const photos = await dbGetAll('photos');
   state.photoCounts = {};
   state.firstPhoto = {};
-  photos
-    .sort((a, b) => a.createdAt - b.createdAt)
-    .forEach((p) => {
-      state.photoCounts[p.restaurantId] = (state.photoCounts[p.restaurantId] || 0) + 1;
-      if (!state.firstPhoto[p.restaurantId]) state.firstPhoto[p.restaurantId] = p.blob;
-    });
+  photos.sort((a, b) => a.createdAt - b.createdAt).forEach((p) => {
+    state.photoCounts[p.restaurantId] = (state.photoCounts[p.restaurantId] || 0) + 1;
+    if (!state.firstPhoto[p.restaurantId]) state.firstPhoto[p.restaurantId] = p.blob;
+  });
+
   render();
 }
 
-function render() {
-  revokeListURLs();
-  const list = $('#list');
-  list.innerHTML = '';
+/* ---------- グループ化（同じ店の複数訪問を束ねる） ---------- */
+function groupMembers(gid) {
+  return state.restaurants
+    .filter((r) => (r.groupId || r.id) === gid)
+    .sort((a, b) => visitTime(b) - visitTime(a)); // 新しい訪問が先頭
+}
 
-  let items = state.restaurants.slice();
-  if (state.filterStatus !== 'all') items = items.filter((r) => r.status === state.filterStatus);
-  if (state.filterPref) items = items.filter((r) => r.prefecture === state.filterPref);
-  items.sort((a, b) => b.createdAt - a.createdAt);
+function buildGroups() {
+  const map = new Map();
+  for (const r of state.restaurants) {
+    const gid = r.groupId || r.id;
+    if (!map.has(gid)) map.set(gid, []);
+    map.get(gid).push(r);
+  }
+  const groups = [];
+  for (const [gid, members] of map) {
+    members.sort((a, b) => visitTime(b) - visitTime(a));
+    const latest = members[0];
+    const rep = members.find((m) => m.genre) || latest;
+    const totalPhotos = members.reduce((s, m) => s + (state.photoCounts[m.id] || 0), 0);
+    const number = Math.min(...members.map((m) => state.regNumbers[m.id] || 1e9));
+    let thumb = null;
+    for (const m of members) { if (state.firstPhoto[m.id]) { thumb = state.firstPhoto[m.id]; break; } }
+    groups.push({
+      gid, members,
+      name: latest.name, prefecture: latest.prefecture || '', genre: rep.genre || '',
+      count: members.length, number,
+      latestDate: displayDate(latest), latestSort: visitTime(latest),
+      status: members.some((m) => m.status === 'visited') ? 'visited' : 'want',
+      totalPhotos, thumb, memo: latest.memo || '',
+    });
+  }
+  return groups;
+}
 
-  $('#emptyState').hidden = items.length !== 0;
-
-  for (const r of items) {
-    const card = document.createElement('article');
-    card.className = 'card';
-    card.dataset.id = r.id;
-
-    const thumb = document.createElement('div');
-    thumb.className = 'card-thumb';
-    const blob = state.firstPhoto[r.id];
-    if (blob) {
-      const im = document.createElement('img');
-      im.src = listURL(blob); im.alt = '';
-      thumb.appendChild(im);
-    } else {
-      thumb.textContent = r.status === 'visited' ? '🍽️' : '📍';
-    }
-
-    const body = document.createElement('div');
-    body.className = 'card-body';
-
-    const name = document.createElement('h3');
-    name.className = 'card-name';
-    name.textContent = r.name;
-
-    const sub = document.createElement('div');
-    sub.className = 'card-sub';
-    sub.appendChild(statusBadge(r.status));
-    if (r.prefecture) {
-      const chip = document.createElement('span');
-      chip.className = 'chip';
-      chip.textContent = r.prefecture;
-      sub.appendChild(chip);
-    }
-    const cnt = state.photoCounts[r.id];
-    if (cnt) {
-      const pc = document.createElement('span');
-      pc.className = 'chip';
-      pc.textContent = '📷 ' + cnt;
-      sub.appendChild(pc);
-    }
-
-    body.appendChild(name);
-    body.appendChild(sub);
-    if (r.memo) {
-      const m = document.createElement('p');
-      m.className = 'card-memo';
-      m.textContent = r.memo;
-      body.appendChild(m);
-    }
-
-    card.appendChild(thumb);
-    card.appendChild(body);
-    card.addEventListener('click', () => openDetail(r.id));
-    list.appendChild(card);
+function sortGroups(groups) {
+  switch (state.sortMode) {
+    case 'date_desc': groups.sort((a, b) => b.latestSort - a.latestSort); break;
+    case 'date_asc':  groups.sort((a, b) => a.latestSort - b.latestSort); break;
+    case 'pref':      groups.sort((a, b) => (a.prefecture || '￿').localeCompare(b.prefecture || '￿', 'ja') || b.number - a.number); break;
+    case 'genre':     groups.sort((a, b) => (a.genre || '￿').localeCompare(b.genre || '￿', 'ja') || b.number - a.number); break;
+    case 'reg':
+    default:          groups.sort((a, b) => b.number - a.number); break; // 登録が新しい順（番号の大きい方が上）
   }
 }
+
+/* ---------- 一覧描画 ---------- */
+function chip(text) { const c = document.createElement('span'); c.className = 'chip'; c.textContent = text; return c; }
 
 function statusBadge(status) {
   const b = document.createElement('span');
@@ -302,15 +329,85 @@ function statusBadge(status) {
   return b;
 }
 
+function render() {
+  const oldUrls = [..._listUrls]; _listUrls.clear();
+  const list = $('#list');
+  list.innerHTML = '';               // 先に古い<img>を外す
+
+  let groups = buildGroups();
+  if (state.filterStatus !== 'all') groups = groups.filter((g) => g.status === state.filterStatus);
+  if (state.filterPref) groups = groups.filter((g) => g.prefecture === state.filterPref);
+  if (state.filterGenre) groups = groups.filter((g) => g.genre === state.filterGenre);
+  sortGroups(groups);
+
+  $('#emptyState').hidden = groups.length !== 0;
+  for (const g of groups) list.appendChild(buildCard(g));
+
+  // 旧URLは少し遅らせて解放（差し替え中の読み込み中断＝404ノイズを防ぐ）
+  setTimeout(() => oldUrls.forEach((u) => URL.revokeObjectURL(u)), 1500);
+}
+
+function buildCard(g) {
+  const card = document.createElement('article');
+  card.className = 'card';
+  card.dataset.gid = g.gid;
+
+  const thumb = document.createElement('div');
+  thumb.className = 'card-thumb';
+  if (g.thumb) { const im = document.createElement('img'); im.src = listURL(g.thumb); im.alt = ''; thumb.appendChild(im); }
+  else thumb.textContent = g.status === 'visited' ? '🍽️' : '📍';
+
+  const body = document.createElement('div');
+  body.className = 'card-body';
+
+  const name = document.createElement('h3');
+  name.className = 'card-name';
+  const num = document.createElement('span');
+  num.className = 'card-num';
+  num.textContent = '#' + g.number;
+  name.appendChild(num);
+  name.appendChild(document.createTextNode(' ' + g.name));
+  if (g.count > 1) {
+    const vb = document.createElement('span');
+    vb.className = 'visit-badge';
+    vb.textContent = g.count + '回';
+    name.appendChild(vb);
+  }
+
+  const sub = document.createElement('div');
+  sub.className = 'card-sub';
+  sub.appendChild(statusBadge(g.status));
+  if (g.genre) sub.appendChild(chip(g.genre));
+  if (g.prefecture) sub.appendChild(chip(g.prefecture));
+  if (g.latestDate) sub.appendChild(chip('📅 ' + g.latestDate));
+  if (g.totalPhotos) sub.appendChild(chip('📷 ' + g.totalPhotos));
+
+  body.appendChild(name);
+  body.appendChild(sub);
+  if (g.memo) { const m = document.createElement('p'); m.className = 'card-memo'; m.textContent = g.memo; body.appendChild(m); }
+
+  card.appendChild(thumb);
+  card.appendChild(body);
+  card.addEventListener('click', () => openDetail(g.gid));
+  return card;
+}
+
 /* ---------- 追加/編集フォーム（写真もここで管理） ---------- */
-async function openEdit(r) {
-  $('#editTitle').textContent = r ? '店を編集' : '店を追加';
+// r=編集対象レコード（新規はnull） / prefill={name,prefecture,genre}（「もう1回来た」用）
+async function openEdit(r, prefill) {
+  // 新規登録（＝訪問の追加も含む）は300件上限でブロック
+  if (!r && state.restaurants.length >= MAX_STORES) {
+    toast(`登録は${MAX_STORES}件までです。古い店を整理してね`);
+    return;
+  }
+  $('#editTitle').textContent = r ? '店を編集' : (prefill ? 'もう1回来た（訪問を追加）' : '店を追加');
   $('#f_id').value = r ? r.id : '';
-  $('#f_name').value = r ? r.name : '';
-  $('#f_pref').value = r ? (r.prefecture || '') : '';
+  $('#f_name').value = r ? r.name : (prefill ? prefill.name : '');
+  $('#f_pref').value = r ? (r.prefecture || '') : (prefill ? (prefill.prefecture || '') : '');
+  $('#f_genre').value = r ? (r.genre || '') : (prefill ? (prefill.genre || '') : '');
   $('#f_url').value = r ? (r.url || '') : '';
   $('#f_memo').value = r ? (r.memo || '') : '';
-  const st = r ? r.status : 'want';
+  const st = r ? r.status : (prefill ? 'visited' : 'want'); // 訪問追加なら"行った"を既定に
   document.querySelector(`input[name=f_status][value=${st}]`).checked = true;
   $('#deleteBtn').hidden = !r;
 
@@ -357,7 +454,7 @@ function renderFormPhotos() {
   $('#f_photocount').textContent = `(${n}/${MAX_PHOTOS})`;
   const addBtn = $('.photo-add');
   addBtn.style.display = n >= MAX_PHOTOS ? 'none' : '';
-  oldUrls.forEach((u) => URL.revokeObjectURL(u)); // 差し替え後に旧URLを解放
+  setTimeout(() => oldUrls.forEach((u) => URL.revokeObjectURL(u)), 1500);
 }
 
 function removeFormPhoto(idx) {
@@ -420,10 +517,25 @@ async function saveFromForm(e) {
   if (!name) { toast('店名を入力してね'); return; }
   const id = $('#f_id').value || uid();
   const existing = state.restaurants.find((r) => r.id === id);
+  if (!existing && state.restaurants.length >= MAX_STORES) {
+    toast(`登録は${MAX_STORES}件までです。古い店を整理してね`); return;
+  }
+  const prefecture = $('#f_pref').value;
+
+  // グループ判定: 既存編集は現状維持 / 新規は同名+同県があれば重ねる
+  let groupId, mergedInto = null;
+  if (existing) {
+    groupId = existing.groupId || id;
+  } else {
+    const key = groupKeyOf(name, prefecture);
+    const match = state.restaurants.find((r) => groupKeyOf(r.name, r.prefecture) === key);
+    if (match) { groupId = match.groupId || match.id; mergedInto = match; }
+    else groupId = id;
+  }
+
   const rec = {
-    id,
-    name,
-    prefecture: $('#f_pref').value,
+    id, name, prefecture, groupId,
+    genre: $('#f_genre').value,
     url: $('#f_url').value.trim(),
     memo: $('#f_memo').value.trim(),
     status: document.querySelector('input[name=f_status]:checked').value,
@@ -445,7 +557,25 @@ async function saveFromForm(e) {
 
   hideModal('#editModal');
   await loadAll();
-  toast(existing ? '保存しました' : '追加しました');
+
+  if (mergedInto) {
+    const cnt = state.restaurants.filter((r) => (r.groupId || r.id) === groupId).length;
+    toast(`「${name}」の${cnt}回目として記録`, { label: '別の店に分ける', fn: () => unstack(id) });
+  } else {
+    toast(existing ? '保存しました' : '追加しました');
+  }
+}
+
+// 重なった訪問を別の店として切り離す（groupIdを自分だけに）
+async function unstack(recordId) {
+  const r = state.restaurants.find((x) => x.id === recordId);
+  if (!r) return;
+  r.groupId = r.id;
+  r.updatedAt = Date.now();
+  await dbPut('restaurants', r);
+  hideModal('#detailModal');
+  await loadAll();
+  toast('別の店として分けました');
 }
 
 async function deleteCurrent() {
@@ -461,55 +591,105 @@ async function deleteCurrent() {
   toast('削除しました');
 }
 
-/* ---------- 詳細（見るだけ） ---------- */
-async function openDetail(id) {
-  const r = state.restaurants.find((x) => x.id === id);
-  if (!r) return;
-  state.currentId = id;
-  $('#d_name').textContent = r.name;
+/* ---------- 詳細（グループ＝複数訪問をまとめて表示） ---------- */
+async function openDetail(gid) {
+  const members = groupMembers(gid);
+  if (!members.length) return;
+  state.currentGroupId = gid;
+  const rep = members.find((m) => m.genre) || members[0];
+
+  $('#d_name').textContent = members[0].name;
+  const anyVisited = members.some((m) => m.status === 'visited');
   const badge = $('#d_status');
-  badge.className = 'badge ' + r.status;
-  badge.textContent = r.status === 'visited' ? '行った' : '行きたい';
-  const pref = $('#d_pref');
-  pref.textContent = r.prefecture || '未設定';
-  const dateEl = $('#d_date');
-  const ds = displayDate(r);
-  if (ds) { dateEl.textContent = '📅 ' + ds; dateEl.hidden = false; } else { dateEl.hidden = true; }
-  const urlEl = $('#d_url');
-  if (r.url) { urlEl.href = r.url; urlEl.hidden = false; } else { urlEl.hidden = true; }
-  $('#d_memo').textContent = r.memo || '';
-  $('#toggleStatusBtn').textContent = r.status === 'visited' ? '「行きたい」に戻す' : '「行った」にする';
-  await renderDetailPhotos(id);
+  badge.className = 'badge ' + (anyVisited ? 'visited' : 'want');
+  badge.textContent = anyVisited ? '行った' : '行きたい';
+
+  const gEl = $('#d_genre');
+  if (rep.genre) { gEl.textContent = rep.genre; gEl.hidden = false; } else gEl.hidden = true;
+  $('#d_pref').textContent = members[0].prefecture || '未設定';
+  const cEl = $('#d_count');
+  if (members.length > 1) { cEl.textContent = members.length + '回訪問'; cEl.hidden = false; } else cEl.hidden = true;
+
+  await renderVisits(members);
   showModal('#detailModal');
 }
 
-async function renderDetailPhotos(id) {
+async function renderVisits(members) {
   const oldUrls = [..._viewUrls]; _viewUrls.clear();
-  const grid = $('#photoGrid');
-  grid.innerHTML = '';
-  const photos = (await dbGetByIndex('photos', 'byRestaurant', id)).sort((a, b) => a.createdAt - b.createdAt);
-  $('#d_photocount').textContent = photos.length ? `(${photos.length})` : '（なし）';
-  const blobs = photos.map((p) => p.blob);
-  photos.forEach((p, i) => {
-    const cell = document.createElement('div');
-    cell.className = 'photo-cell';
-    const im = document.createElement('img');
-    im.src = viewURL(p.blob); im.alt = '';
-    im.addEventListener('click', () => openLightbox(blobs, i));
-    cell.appendChild(im);
-    grid.appendChild(cell);
-  });
-  oldUrls.forEach((u) => URL.revokeObjectURL(u));
+  const wrap = $('#d_visits');
+  wrap.innerHTML = '';
+  const multi = members.length > 1;
+
+  for (const r of members) {
+    const photos = (await dbGetByIndex('photos', 'byRestaurant', r.id)).sort((a, b) => a.createdAt - b.createdAt);
+    const blobs = photos.map((p) => p.blob);
+
+    const block = document.createElement('div');
+    block.className = 'visit';
+
+    const head = document.createElement('div');
+    head.className = 'visit-head';
+    const left = document.createElement('div');
+    left.className = 'visit-head-left';
+    left.appendChild(chip('#' + (state.regNumbers[r.id] || '?')));
+    left.appendChild(statusBadge(r.status));
+    const ds = displayDate(r);
+    if (ds) { const d = document.createElement('span'); d.className = 'visit-date'; d.textContent = '📅 ' + ds; left.appendChild(d); }
+    head.appendChild(left);
+
+    const actions = document.createElement('div');
+    actions.className = 'visit-actions';
+    const editB = document.createElement('button');
+    editB.className = 'btn tiny';
+    editB.textContent = '編集';
+    editB.addEventListener('click', () => { hideModal('#detailModal'); openEdit(r); });
+    actions.appendChild(editB);
+    if (multi) {
+      const sep = document.createElement('button');
+      sep.className = 'btn tiny ghost';
+      sep.textContent = '別の店に分ける';
+      sep.addEventListener('click', () => unstack(r.id));
+      actions.appendChild(sep);
+    }
+    head.appendChild(actions);
+    block.appendChild(head);
+
+    if (r.url) {
+      const a = document.createElement('a');
+      a.className = 'detail-url';
+      a.href = r.url; a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = '🔗 リンクを開く';
+      block.appendChild(a);
+    }
+    if (r.memo) { const m = document.createElement('p'); m.className = 'detail-memo'; m.textContent = r.memo; block.appendChild(m); }
+
+    if (photos.length) {
+      const grid = document.createElement('div');
+      grid.className = 'photo-grid view';
+      photos.forEach((p, i) => {
+        const cell = document.createElement('div');
+        cell.className = 'photo-cell';
+        const im = document.createElement('img');
+        im.src = viewURL(p.blob); im.alt = '';
+        im.addEventListener('click', () => openLightbox(blobs, i));
+        cell.appendChild(im);
+        grid.appendChild(cell);
+      });
+      block.appendChild(grid);
+    }
+
+    wrap.appendChild(block);
+  }
+  setTimeout(() => oldUrls.forEach((u) => URL.revokeObjectURL(u)), 1500);
 }
 
-async function toggleStatus() {
-  const r = state.restaurants.find((x) => x.id === state.currentId);
-  if (!r) return;
-  r.status = r.status === 'visited' ? 'want' : 'visited';
-  r.updatedAt = Date.now();
-  await dbPut('restaurants', r);
-  await loadAll();
-  await openDetail(r.id);
+// 詳細で開いている店に「もう1回来た」を追加（同名+同県で自動的に重なる）
+function addVisitToCurrentGroup() {
+  const members = groupMembers(state.currentGroupId);
+  if (!members.length) return;
+  const base = members[0];
+  hideModal('#detailModal');
+  openEdit(null, { name: base.name, prefecture: base.prefecture || '', genre: base.genre || '' });
 }
 
 /* ---------- 写真の拡大表示（スワイプ移動/ピンチ/パン/ダブルタップ） ---------- */
@@ -677,7 +857,7 @@ async function exportData() {
   for (const p of photosRaw) {
     photos.push({ id: p.id, restaurantId: p.restaurantId, createdAt: p.createdAt, dataURL: await blobToDataURL(p.blob) });
   }
-  const payload = { app: 'resto-log', version: 1, exportedAt: new Date().toISOString(), restaurants, photos };
+  const payload = { app: 'resto-log', version: 2, exportedAt: new Date().toISOString(), restaurants, photos };
   const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
   const a = document.createElement('a');
   const stamp = new Date().toISOString().slice(0, 10);
@@ -708,7 +888,15 @@ async function importData(file) {
 async function updateMenuStat() {
   const r = await dbGetAll('restaurants');
   const p = await dbGetAll('photos');
-  $('#menuStat').textContent = `保存中：店 ${r.length} 件 ・ 写真 ${p.length} 枚（すべてこの端末内）`;
+  let usage = '';
+  try {
+    if (navigator.storage && navigator.storage.estimate) {
+      const est = await navigator.storage.estimate();
+      const mb = (est.usage || 0) / 1048576;
+      usage = ` ・ 使用中 約${mb < 10 ? mb.toFixed(1) : Math.round(mb)}MB`;
+    }
+  } catch (_) { /* 取れない環境は表示しない */ }
+  $('#menuStat').textContent = `店 ${r.length}/${MAX_STORES} 件 ・ 写真 ${p.length} 枚${usage}（すべてこの端末内）`;
 }
 
 /* ---------- モーダル制御 ---------- */
@@ -732,6 +920,18 @@ function initPrefOptions() {
   }
 }
 
+function initGenreOptions() {
+  const filter = $('#genreFilter');
+  const formSel = $('#f_genre');
+  const blank = document.createElement('option');
+  blank.value = ''; blank.textContent = '未設定';
+  formSel.appendChild(blank);
+  for (const g of GENRES) {
+    const o1 = document.createElement('option'); o1.value = g; o1.textContent = g; filter.appendChild(o1);
+    const o2 = document.createElement('option'); o2.value = g; o2.textContent = g; formSel.appendChild(o2);
+  }
+}
+
 function bindEvents() {
   bindLightbox();
   $('#fab').addEventListener('click', () => openEdit(null));
@@ -748,13 +948,10 @@ function bindEvents() {
     render();
   });
   $('#prefFilter').addEventListener('change', (e) => { state.filterPref = e.target.value; render(); });
+  $('#genreFilter').addEventListener('change', (e) => { state.filterGenre = e.target.value; render(); });
+  $('#sortSelect').addEventListener('change', (e) => { state.sortMode = e.target.value; render(); });
 
-  $('#toggleStatusBtn').addEventListener('click', toggleStatus);
-  $('#editFromDetailBtn').addEventListener('click', () => {
-    const r = state.restaurants.find((x) => x.id === state.currentId);
-    hideModal('#detailModal');
-    openEdit(r);
-  });
+  $('#addVisitBtn').addEventListener('click', addVisitToCurrentGroup);
 
   $('#menuBtn').addEventListener('click', () => { updateMenuStat(); showModal('#menuModal'); });
   $('#exportBtn').addEventListener('click', exportData);
@@ -770,6 +967,7 @@ function bindEvents() {
 
 async function init() {
   initPrefOptions();
+  initGenreOptions();
   bindEvents();
   try {
     await loadAll();
