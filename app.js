@@ -425,9 +425,16 @@ async function openEdit(r, prefill) {
     state.form.photos = existing.map((p) => ({ key: p.id, blob: p.blob, dbId: p.id }));
   }
   renderFormPhotos();
+  updatePhotoFieldVisibility();
 
   showModal('#editModal');
   if (!r) setTimeout(() => $('#f_name').focus(), 100);
+}
+
+// 写真欄は「行った」のときだけ表示（行きたい＝写真なし）
+function updatePhotoFieldVisibility() {
+  const status = document.querySelector('input[name=f_status]:checked').value;
+  $('#photoField').hidden = status !== 'visited';
 }
 
 function renderFormPhotos() {
@@ -521,6 +528,13 @@ async function saveFromForm(e) {
     toast(`登録は${MAX_STORES}件までです。古い店を整理してね`); return;
   }
   const prefecture = $('#f_pref').value;
+  const status = document.querySelector('input[name=f_status]:checked').value;
+
+  // 「行きたい」は写真なし。写真がある状態で行きたいにするなら削除確認
+  const dropPhotos = (status === 'want') && state.form.photos.length > 0;
+  if (dropPhotos && !confirm('「行きたい」に戻すと、この店のアプリ内の写真は削除されます（スマホの元の写真は消えません）。よろしいですか？')) {
+    return;
+  }
 
   // グループ判定: 既存編集は現状維持 / 新規は同名+同県があれば重ねる
   let groupId, mergedInto = null;
@@ -538,18 +552,24 @@ async function saveFromForm(e) {
     genre: $('#f_genre').value,
     url: $('#f_url').value.trim(),
     memo: $('#f_memo').value.trim(),
-    status: document.querySelector('input[name=f_status]:checked').value,
+    status,
     date: $('#f_date').value || (existing && existing.date) || todayStr(),
     createdAt: existing ? existing.createdAt : Date.now(),
     updatedAt: Date.now(),
   };
   await dbPut('restaurants', rec);
 
-  // 写真の反映：削除 → 追加
-  for (const delId of state.form.removed) await dbDelete('photos', delId);
-  for (const p of state.form.photos) {
-    if (!p.dbId) {
-      await dbPut('photos', { id: p.key, restaurantId: id, blob: p.blob, createdAt: Date.now() });
+  if (status === 'want') {
+    // 行きたい＝写真なし: この店の写真を全削除（ステージ中の新規は保存しない）
+    const existingPhotos = await dbGetByIndex('photos', 'byRestaurant', id);
+    for (const p of existingPhotos) await dbDelete('photos', p.id);
+  } else {
+    // 写真の反映：削除 → 追加
+    for (const delId of state.form.removed) await dbDelete('photos', delId);
+    for (const p of state.form.photos) {
+      if (!p.dbId) {
+        await dbPut('photos', { id: p.key, restaurantId: id, blob: p.blob, createdAt: Date.now() });
+      }
     }
   }
   state.form.photos = [];
@@ -942,6 +962,8 @@ function bindEvents() {
   $('#deleteBtn').addEventListener('click', deleteCurrent);
   $('#f_photoInput').addEventListener('change', (e) => { addFormPhotos(e.target.files); e.target.value = ''; });
   $('#f_date').addEventListener('input', () => { state.form.dateManual = true; $('#f_dateNote').textContent = ''; });
+  document.querySelectorAll('input[name=f_status]').forEach((el) =>
+    el.addEventListener('change', updatePhotoFieldVisibility));
 
   $('#statusTabs').addEventListener('click', (e) => {
     const btn = e.target.closest('.tab'); if (!btn) return;

@@ -175,6 +175,7 @@ body {
 /* ===== フォーム ===== */
 .form { display: flex; flex-direction: column; gap: 14px; }
 .field { display: flex; flex-direction: column; gap: 6px; border: none; padding: 0; margin: 0; }
+.field[hidden] { display: none; }
 .field .label { font-size: 13px; font-weight: 600; color: var(--muted); }
 .field .label em { color: var(--brand); font-style: normal; }
 input[type=text], input[type=url], textarea, select {
