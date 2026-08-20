@@ -700,6 +700,7 @@ const lb = {
   startDist: 0, startScale: 1, startTx: 0, startTy: 0,
   startX: 0, startY: 0, dragDX: 0, dragDY: 0,
   lastTap: 0, moved: false, downOnImage: false,
+  closedAt: 0, // 拡大表示を閉じた時刻（ゴーストクリック対策）
 };
 
 function applyLb() {
@@ -732,6 +733,8 @@ function openLightbox(blobs, index) {
 
 function closeLightbox() {
   const box = $('#lightbox');
+  if (box.hidden) return;
+  lb.closedAt = Date.now(); // 直後の背景タップ貫通で下のモーダルを閉じさせない
   box.hidden = true;
   $('#lightboxImg').src = '';
   if (lb.url) { URL.revokeObjectURL(lb.url); lb.url = null; }
@@ -961,7 +964,11 @@ function bindEvents() {
     b.addEventListener('click', (e) => hideModal('#' + e.target.closest('.modal').id))
   );
   document.querySelectorAll('.modal').forEach((m) =>
-    m.addEventListener('click', (e) => { if (e.target === m) hideModal('#' + m.id); })
+    m.addEventListener('click', (e) => {
+      // 拡大表示を閉じた直後のタップ貫通では閉じない（保存前の入力を守る）
+      if (Date.now() - lb.closedAt < 500) return;
+      if (e.target === m) hideModal('#' + m.id);
+    })
   );
 }
 
