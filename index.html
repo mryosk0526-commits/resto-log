@@ -49,6 +49,13 @@
         <option value="genre">ジャンル順</option>
       </select>
     </div>
+    <div class="viewbar">
+      <div class="viewmodes" id="viewModes" role="group" aria-label="表示切替">
+        <button class="vm" data-mode="list">☰ リスト</button>
+        <button class="vm" data-mode="card">▦ カード</button>
+        <button class="vm" data-mode="gallery">▧ ギャラリー</button>
+      </div>
+    </div>
   </div>
 
   <!-- ===== 絞り込み中バー（地方など） ===== -->
@@ -59,6 +66,7 @@
 
   <!-- ===== リスト ===== -->
   <main class="list" id="list"></main>
+  <div id="listSentinel" aria-hidden="true"></div>
 
   <!-- ===== 空状態 ===== -->
   <div class="empty" id="emptyState" hidden>

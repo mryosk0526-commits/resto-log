@@ -1,12 +1,13 @@
 'use strict';
 /* 公開ビュー（読み取り専用）。?u={userId} の公開店を匿名で表示する。
    ・ログイン不要（anonクライアント）／is_public な行だけRLSで読める
+   ・本体アプリと同じカードUI（リスト/カード/ギャラリー切替）＋写真の拡大表示
    ・写真は公開フラグのある物だけStorageから匿名で落とせる */
 (async function () {
-  const root = document.getElementById('app');
+  const app = document.getElementById('app');
+  const tools = document.getElementById('viewTools');
   const sub = document.getElementById('vsub');
-  const bad = (m) => { root.innerHTML = '<p class="msg">' + m + '</p>'; };
-  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+  const bad = (m) => { app.innerHTML = '<p class="msg">' + m + '</p>'; };
 
   const uid = new URLSearchParams(location.search).get('u');
   if (!uid) return bad('共有リンクが正しくありません。');
@@ -29,43 +30,102 @@
   const groups = new Map();
   for (const r of rests) { const g = r.group_id || r.id; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(r); }
   const photosByRest = {};
-  for (const pm of pmeta) { (photosByRest[pm.restaurant_id] = photosByRest[pm.restaurant_id] || []).push(pm); }
+  for (const pm of pmeta) (photosByRest[pm.restaurant_id] = photosByRest[pm.restaurant_id] || []).push(pm);
 
   sub.textContent = `公開中のお店 ${groups.size} 軒`;
-  root.innerHTML = '';
-  const frag = document.createDocumentFragment();
-  const toDownload = [];
 
-  for (const [, members] of groups) {
+  // 表示用グループ（写真は撮影順で id を集める）
+  const view = [];
+  for (const [gid, members] of groups) {
     members.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
     const rep = members.find((m) => m.genre) || members[0];
-    const times = members.length > 1 ? `（${members.length}回）` : '';
-    const card = document.createElement('div'); card.className = 'vcard';
-    card.innerHTML =
-      `<h3>${esc(members[0].name)}${times}</h3>
-       <div class="vmeta">
-         <span class="badge visited">行った</span>
-         ${rep.prefecture ? `<span class="chip">${esc(rep.prefecture)}</span>` : ''}
-         ${rep.genre ? `<span class="chip">${esc(rep.genre)}</span>` : ''}
-         ${rep.date ? `<span class="chip">🗓 ${esc(rep.date)}</span>` : ''}
-       </div>
-       <div class="vphotos"></div>
-       ${rep.memo ? `<p class="vmemo">${esc(rep.memo)}</p>` : ''}`;
-    const ph = card.querySelector('.vphotos');
-    for (const m of members) {
-      for (const pm of (photosByRest[m.id] || [])) {
-        const img = document.createElement('img'); img.alt = ''; ph.appendChild(img);
-        toDownload.push({ img, path: `${uid}/${pm.id}.jpg` });
-      }
+    const latest = members[0];
+    const photoIds = [];
+    for (const m of members.slice().sort((a, b) => (a.created_at || 0) - (b.created_at || 0))) {
+      for (const pm of (photosByRest[m.id] || []).sort((a, b) => (a.created_at || 0) - (b.created_at || 0))) photoIds.push(pm.id);
     }
-    if (!ph.children.length) ph.remove();
-    frag.appendChild(card);
+    view.push({
+      gid, name: latest.name, prefecture: rep.prefecture || '', genre: rep.genre || '',
+      date: rep.date || '', memo: latest.memo || '', count: members.length, photoIds,
+    });
   }
-  root.appendChild(frag);
 
-  // 写真を落として差し込む（公開分だけ匿名で取得可）
-  for (const t of toDownload) {
-    try { const { data: blob, error } = await c.storage.from('photos').download(t.path); if (!error && blob) t.img.src = URL.createObjectURL(blob); }
-    catch (_) {}
+  // ---- Storage ダウンロード（idごとにキャッシュ） ----
+  const urlCache = {};
+  async function getPhotoURL(pid) {
+    if (urlCache[pid]) return urlCache[pid];
+    try {
+      const { data: blob, error } = await c.storage.from('photos').download(`${uid}/${pid}.jpg`);
+      if (!error && blob) { const u = URL.createObjectURL(blob); urlCache[pid] = u; return u; }
+    } catch (_) {}
+    return null;
   }
+
+  // ---- 表示モード（本体と同じ localStorage キー） ----
+  const VIEW_KEY = 'resto-log-view', MODES = ['list', 'card', 'gallery'];
+  let mode = 'card';
+  try { const s = localStorage.getItem(VIEW_KEY); if (MODES.includes(s)) mode = s; } catch (_) {}
+  const list = document.createElement('div');
+  app.innerHTML = ''; app.appendChild(list);
+  tools.hidden = false;
+  function applyMode(m) {
+    mode = m; try { localStorage.setItem(VIEW_KEY, m); } catch (_) {}
+    list.className = 'list mode-' + m;
+    document.querySelectorAll('#viewModes .vm').forEach((b) => b.classList.toggle('is-active', b.dataset.mode === m));
+  }
+  document.getElementById('viewModes').addEventListener('click', (e) => { const b = e.target.closest('.vm'); if (b) applyMode(b.dataset.mode); });
+  applyMode(mode);
+
+  // ---- カード描画（本体 buildCard と同じ構造） ----
+  function chip(t) { const s = document.createElement('span'); s.className = 'chip'; s.textContent = t; return s; }
+  const thumbJobs = [];
+  for (const g of view) {
+    const card = document.createElement('article'); card.className = 'card'; card.dataset.gid = g.gid;
+
+    const thumb = document.createElement('div'); thumb.className = 'card-thumb';
+    if (g.photoIds.length) { const im = document.createElement('img'); im.loading = 'lazy'; im.alt = ''; thumb.appendChild(im); thumbJobs.push({ im, pid: g.photoIds[0] }); }
+    else thumb.textContent = '🍽️';
+
+    const body = document.createElement('div'); body.className = 'card-body';
+    const name = document.createElement('h3'); name.className = 'card-name'; name.textContent = g.name;
+    if (g.count > 1) { const vb = document.createElement('span'); vb.className = 'visit-badge'; vb.textContent = g.count + '回'; name.appendChild(document.createTextNode(' ')); name.appendChild(vb); }
+
+    const subEl = document.createElement('div'); subEl.className = 'card-sub';
+    const badge = document.createElement('span'); badge.className = 'badge visited'; badge.textContent = '行った'; subEl.appendChild(badge);
+    if (g.genre) subEl.appendChild(chip(g.genre));
+    if (g.prefecture) subEl.appendChild(chip(g.prefecture));
+    if (g.date) subEl.appendChild(chip('📅 ' + g.date.replace(/-/g, '/')));
+    if (g.photoIds.length) subEl.appendChild(chip('📷 ' + g.photoIds.length));
+
+    body.appendChild(name); body.appendChild(subEl);
+    if (g.memo) { const m = document.createElement('p'); m.className = 'card-memo'; m.textContent = g.memo; body.appendChild(m); }
+
+    card.appendChild(thumb); card.appendChild(body);
+    if (g.photoIds.length) card.addEventListener('click', () => openLightbox(g.photoIds));
+    list.appendChild(card);
+  }
+
+  // サムネ（各店の先頭写真）を順次ダウンロードして差し込む
+  for (const j of thumbJobs) getPhotoURL(j.pid).then((u) => { if (u) j.im.src = u; });
+
+  // ---- ライトボックス（タップで拡大・スワイプ/矢印で送る） ----
+  const lb = document.getElementById('lightbox');
+  const lbImg = document.getElementById('lightboxImg');
+  const lbCount = document.getElementById('lightboxCount');
+  let lbList = [], lbIdx = 0;
+  async function showLb() {
+    lbCount.textContent = (lbIdx + 1) + ' / ' + lbList.length;
+    lbImg.removeAttribute('src');
+    const u = await getPhotoURL(lbList[lbIdx]);
+    if (u && lb && !lb.hidden) lbImg.src = u;
+  }
+  async function openLightbox(ids) { lbList = ids; lbIdx = 0; lb.hidden = false; document.body.style.overflow = 'hidden'; await showLb(); }
+  function closeLb() { lb.hidden = true; document.body.style.overflow = ''; }
+  function nav(d) { if (lbList.length < 2) return; lbIdx = (lbIdx + d + lbList.length) % lbList.length; showLb(); }
+  document.getElementById('lightboxClose').addEventListener('click', closeLb);
+  lb.addEventListener('click', (e) => { if (e.target === lb) closeLb(); });
+  let sx = null;
+  lb.addEventListener('touchstart', (e) => { sx = e.touches[0].clientX; }, { passive: true });
+  lb.addEventListener('touchend', (e) => { if (sx == null) return; const dx = e.changedTouches[0].clientX - sx; sx = null; if (Math.abs(dx) > 40) nav(dx < 0 ? 1 : -1); }, { passive: true });
+  document.addEventListener('keydown', (e) => { if (lb.hidden) return; if (e.key === 'Escape') closeLb(); else if (e.key === 'ArrowRight') nav(1); else if (e.key === 'ArrowLeft') nav(-1); });
 })();

@@ -11,12 +11,7 @@
     .view-header { padding: 16px; text-align: center; border-bottom: 1px solid var(--line); background: var(--surface); }
     .view-title { font-size: 20px; font-weight: 800; }
     .view-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
-    .vcard { background: var(--surface); border-bottom: 1px solid var(--line); padding: 14px 16px; }
-    .vcard h3 { font-size: 16px; margin: 0 0 6px; }
-    .vmeta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; align-items: center; }
-    .vmemo { font-size: 13px; color: var(--text-2); margin: 6px 0 0; white-space: pre-wrap; }
-    .vphotos { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
-    .vphotos img { height: 110px; border-radius: 8px; flex: 0 0 auto; object-fit: cover; background: var(--bg); }
+    .view-tools { padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--bg); }
     .msg { padding: 44px 20px; text-align: center; color: var(--muted); }
     .view-foot { padding: 20px; text-align: center; font-size: 12px; color: var(--muted); }
   </style>
@@ -26,8 +21,25 @@
     <div class="view-title">🍜 食べ歩きメモ</div>
     <div class="view-sub" id="vsub">公開ページ</div>
   </div>
+  <div class="view-tools" id="viewTools" hidden>
+    <div class="viewbar">
+      <div class="viewmodes" id="viewModes" role="group" aria-label="表示切替">
+        <button class="vm" data-mode="list">☰ リスト</button>
+        <button class="vm" data-mode="card">▦ カード</button>
+        <button class="vm" data-mode="gallery">▧ ギャラリー</button>
+      </div>
+    </div>
+  </div>
   <main id="app"><p class="msg">読み込み中…</p></main>
   <div class="view-foot">閲覧専用ページ</div>
+
+  <!-- 写真の拡大表示 -->
+  <div class="lightbox" id="lightbox" hidden>
+    <button class="lightbox-close" id="lightboxClose" aria-label="閉じる">✕</button>
+    <span class="lightbox-count" id="lightboxCount"></span>
+    <img id="lightboxImg" alt="" draggable="false" />
+    <p class="lightbox-hint">スワイプ／矢印で送る・背景タップで閉じる</p>
+  </div>
 
   <script src="vendor/supabase.min.js"></script>
   <script src="config.js"></script>

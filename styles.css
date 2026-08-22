@@ -162,6 +162,44 @@ body {
 .card-sub { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .card-memo { color: var(--muted); font-size: 13px; margin: 6px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* ===== 表示モード（リスト/カード/ギャラリー） ===== */
+/* 既定(mode-list)＝上のベース .list/.card がそのまま生きる */
+.list.mode-list { max-width: 760px; margin-inline: auto; gap: 8px; }
+
+/* カード：写真を上に載せた縦カードのグリッド（スマホ1列→広幅で複数列） */
+.list.mode-card {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px; max-width: 1040px; margin-inline: auto;
+}
+.mode-card .card { flex-direction: column; padding: 0; gap: 0; overflow: hidden; }
+.mode-card .card-thumb { width: 100%; height: 140px; border-radius: 0; }
+.mode-card .card-body { padding: 10px 12px 12px; width: 100%; }
+
+/* ギャラリー：写真主役の可変グリッド(masonry・CSS columns) */
+.list.mode-gallery {
+  display: block; column-width: 180px; column-gap: 10px;
+  max-width: 1040px; margin-inline: auto;
+}
+.mode-gallery .card { display: block; break-inside: avoid; margin: 0 0 10px; padding: 0; gap: 0; overflow: hidden; }
+.mode-gallery .card-thumb { width: 100%; height: auto; min-height: 70px; border-radius: 0; }
+.mode-gallery .card-thumb img { width: 100%; height: auto; }
+.mode-gallery .card-body { padding: 8px 10px; }
+.mode-gallery .card-sub, .mode-gallery .card-memo { display: none; }
+
+/* 表示切替セグメント */
+.viewbar { display: flex; justify-content: flex-end; }
+.viewmodes { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.vm {
+  background: var(--surface); border: none; border-right: 1px solid var(--line);
+  padding: 6px 10px; font-size: 12px; color: var(--muted); cursor: pointer; font-family: inherit;
+}
+.vm:last-child { border-right: none; }
+.vm.is-active { background: var(--brand); color: #fff; font-weight: 600; }
+
+/* 無限スクロールの番兵 */
+#listSentinel { height: 1px; }
+
 .badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
 .badge.want { color: var(--want); background: var(--want-soft); }
 .badge.visited { color: var(--visited); background: var(--visited-soft); }

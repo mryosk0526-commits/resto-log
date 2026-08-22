@@ -284,6 +284,8 @@ const state = {
   currentGroupId: null, // 詳細表示中のグループid
   filterBeforeConquest: null, // 制覇画面に入る前のフィルタ（閉じたら戻す）
   cal: { y: null, m: null, sel: null }, // カレンダー: 表示中の年/月(0-11)・選択中の日付(YYYY-MM-DD)
+  viewMode: 'card',  // 表示モード: list / card / gallery
+  view: { groups: [], rendered: 0 }, // 一覧の段階描画（無限スクロール）
   // 編集フォームの写真ステージング
   form: { photos: [], removed: [], dateManual: false }, // photos: {key, blob, dbId|null}
 };
@@ -381,6 +383,8 @@ function statusBadge(status) {
   return b;
 }
 
+const RENDER_BATCH = 24; // 一度に描画する件数（残りはスクロールで追加）
+
 function render() {
   const oldUrls = [..._listUrls]; _listUrls.clear();
   const list = $('#list');
@@ -399,10 +403,37 @@ function render() {
   updateActiveFilterBar();
 
   $('#emptyState').hidden = groups.length !== 0;
-  for (const g of groups) list.appendChild(buildCard(g));
+
+  // 段階描画：まず先頭バッチだけ描き、残りはスクロールで追加（画像も遅延）
+  state.view.groups = groups;
+  state.view.rendered = 0;
+  renderNextBatch();
+  maybeLoadMore();
 
   // 旧URLは少し遅らせて解放（差し替え中の読み込み中断＝404ノイズを防ぐ）
   setTimeout(() => oldUrls.forEach((u) => URL.revokeObjectURL(u)), 1500);
+}
+
+function renderNextBatch() {
+  const list = $('#list');
+  const groups = state.view.groups;
+  const end = Math.min(state.view.rendered + RENDER_BATCH, groups.length);
+  const frag = document.createDocumentFragment();
+  for (let i = state.view.rendered; i < end; i++) frag.appendChild(buildCard(groups[i]));
+  list.appendChild(frag);
+  state.view.rendered = end;
+}
+
+// 番兵がまだ画面近くにある間、残りをバッチで描き足す（初期表示・スクロール・モード切替で使用）
+function maybeLoadMore() {
+  const s = $('#listSentinel');
+  if (!s) return;
+  let guard = 0;
+  while (state.view.rendered < state.view.groups.length) {
+    if (s.getBoundingClientRect().top > window.innerHeight + 600) break;
+    renderNextBatch();
+    if (++guard > 25) break;
+  }
 }
 
 function buildCard(g) {
@@ -412,7 +443,7 @@ function buildCard(g) {
 
   const thumb = document.createElement('div');
   thumb.className = 'card-thumb';
-  if (g.thumb) { const im = document.createElement('img'); im.src = listURL(g.thumb); im.alt = ''; thumb.appendChild(im); }
+  if (g.thumb) { const im = document.createElement('img'); im.loading = 'lazy'; im.decoding = 'async'; im.src = listURL(g.thumb); im.alt = ''; thumb.appendChild(im); }
   else thumb.textContent = g.status === 'visited' ? '🍽️' : '📍';
 
   const body = document.createElement('div');
@@ -1159,6 +1190,30 @@ function setDark(on) {
 }
 function applyThemeToggleState() { const tg = $('#darkToggle'); if (tg) tg.checked = effectiveDark(); }
 
+/* ---------- 表示モード（リスト/カード/ギャラリー） ---------- */
+const VIEW_KEY = 'resto-log-view';
+const VIEW_MODES = ['list', 'card', 'gallery'];
+function applyViewMode() {
+  const m = VIEW_MODES.includes(state.viewMode) ? state.viewMode : 'card';
+  const list = $('#list');
+  list.classList.remove('mode-list', 'mode-card', 'mode-gallery');
+  list.classList.add('mode-' + m);
+  document.querySelectorAll('#viewModes .vm').forEach((b) => b.classList.toggle('is-active', b.dataset.mode === m));
+}
+function setViewMode(m) {
+  if (!VIEW_MODES.includes(m)) return;
+  state.viewMode = m;
+  try { localStorage.setItem(VIEW_KEY, m); } catch (_) {}
+  applyViewMode();
+  maybeLoadMore(); // モードで密度が変わるので、足りなければ描き足す
+}
+function initViewMode() {
+  let saved = 'card';
+  try { saved = localStorage.getItem(VIEW_KEY) || 'card'; } catch (_) {}
+  state.viewMode = VIEW_MODES.includes(saved) ? saved : 'card';
+  applyViewMode();
+}
+
 function resetStatusTabTo(status) {
   state.filterStatus = status;
   document.querySelectorAll('#statusTabs .tab').forEach((t) => t.classList.toggle('is-active', t.dataset.status === status));
@@ -1345,6 +1400,16 @@ function bindEvents() {
   $('#cal_prev').addEventListener('click', () => shiftCalMonth(-1));
   $('#cal_next').addEventListener('click', () => shiftCalMonth(1));
   $('#darkToggle').addEventListener('change', (e) => setDark(e.target.checked));
+  $('#viewModes').addEventListener('click', (e) => { const b = e.target.closest('.vm'); if (b) setViewMode(b.dataset.mode); });
+
+  // 無限スクロール：番兵が画面に近づいたら次のバッチを描く
+  const sentinel = $('#listSentinel');
+  if (sentinel && 'IntersectionObserver' in window) {
+    const io = new IntersectionObserver((entries) => { if (entries.some((en) => en.isIntersecting)) maybeLoadMore(); }, { rootMargin: '500px' });
+    io.observe(sentinel);
+  } else {
+    window.addEventListener('scroll', () => maybeLoadMore(), { passive: true });
+  }
   $('#menuBtn').addEventListener('click', () => { updateMenuStat(); applyConquestVisibility(); applyThemeToggleState(); if (window.RestoSync) RestoSync.renderPanel(); showModal('#menuModal'); });
   $('#exportBtn').addEventListener('click', exportData);
   $('#importInput').addEventListener('change', (e) => { if (e.target.files[0]) importData(e.target.files[0]); e.target.value = ''; });
@@ -1375,6 +1440,7 @@ async function init() {
   bindEvents();
   applyConquestVisibility();
   applyThemeToggleState();
+  initViewMode();
   try {
     await loadAll();
   } catch (err) {
