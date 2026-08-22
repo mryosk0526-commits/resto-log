@@ -144,6 +144,11 @@
         <div class="visits" id="d_visits"></div>
 
         <button class="btn ghost add-visit-btn" id="addVisitBtn">＋ もう1回来た（訪問を追加）</button>
+
+        <div class="publish-row" id="d_publishRow" hidden>
+          <span><b>🌐 このお店を公開する</b><small>共有リンクで他の人が見られます（読むだけ）</small></span>
+          <label class="switch"><input type="checkbox" id="d_public" /><span class="slider"></span></label>
+        </div>
       </div>
     </div>
   </div>
@@ -156,6 +161,7 @@
         <button class="icon-btn" data-close aria-label="閉じる">✕</button>
       </div>
       <div class="menu-list">
+        <div id="syncPanel" class="sync-panel"></div>
         <button class="menu-item" id="exportBtn">
           <span class="menu-emoji">📤</span>
           <span><b>バックアップを書き出す</b><small>機種変・データ消え対策（必ず定期的に）</small></span>
@@ -208,6 +214,9 @@
   <!-- ===== トースト ===== -->
   <div class="toast" id="toast" hidden></div>
 
+  <script src="vendor/supabase.min.js"></script>
+  <script src="config.js"></script>
+  <script src="sync.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

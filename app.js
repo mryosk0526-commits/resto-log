@@ -98,6 +98,19 @@ const dbPut = (store, val) => tx(store, 'readwrite').then((s) => reqToPromise(s.
 const dbDelete = (store, key) => tx(store, 'readwrite').then((s) => reqToPromise(s.delete(key)));
 const dbGetByIndex = (store, index, key) =>
   tx(store).then((s) => reqToPromise(s.index(index).getAll(key)));
+const dbGet = (store, key) => tx(store).then((s) => reqToPromise(s.get(key)));
+
+// 同期モジュール(sync.js)から使う最小API
+window.RestoDB = { get: dbGet, put: dbPut, getAll: dbGetAll, delete: dbDelete, getByIndex: dbGetByIndex };
+window.reloadFromDB = async () => { await loadAll(); };
+
+// 写真の削除：アップ済みは同期用tombstone（blob捨てる）、未アップはローカル完結で即削除
+async function removePhoto(id) {
+  const p = await dbGet('photos', id);
+  if (!p) return;
+  if (p.uploaded) { p.deleted = true; p.updatedAt = Date.now(); p.blob = undefined; await dbPut('photos', p); }
+  else { await dbDelete('photos', id); }
+}
 
 /* ---------- ユーティリティ ---------- */
 const $ = (sel) => document.querySelector(sel);
@@ -276,7 +289,8 @@ const state = {
 
 /* ---------- 読み込み ---------- */
 async function loadAll() {
-  state.restaurants = await dbGetAll('restaurants');
+  // deleted(tombstone)は表示から除外。tombstone自体は同期のためIndexedDBに残す
+  state.restaurants = (await dbGetAll('restaurants')).filter((r) => !r.deleted);
 
   // 移行: groupId が無いレコードに付与（店名+都道府県で束ねる／既存の重複も自動でまとまる）
   const missing = state.restaurants.filter((r) => !r.groupId);
@@ -299,7 +313,7 @@ async function loadAll() {
     .forEach((r, i) => { state.regNumbers[r.id] = i + 1; });
 
   // 写真: レコードごとの枚数と先頭写真
-  const photos = await dbGetAll('photos');
+  const photos = (await dbGetAll('photos')).filter((p) => !p.deleted && p.blob);
   state.photoCounts = {};
   state.firstPhoto = {};
   photos.sort((a, b) => a.createdAt - b.createdAt).forEach((p) => {
@@ -605,13 +619,13 @@ async function saveFromForm(e) {
   if (status === 'want') {
     // 行きたい＝写真なし: この店の写真を全削除（ステージ中の新規は保存しない）
     const existingPhotos = await dbGetByIndex('photos', 'byRestaurant', id);
-    for (const p of existingPhotos) await dbDelete('photos', p.id);
+    for (const p of existingPhotos) await removePhoto(p.id);
   } else {
     // 写真の反映：削除 → 追加
-    for (const delId of state.form.removed) await dbDelete('photos', delId);
+    for (const delId of state.form.removed) await removePhoto(delId);
     for (const p of state.form.photos) {
       if (!p.dbId) {
-        await dbPut('photos', { id: p.key, restaurantId: id, blob: p.blob, createdAt: Date.now() });
+        await dbPut('photos', { id: p.key, restaurantId: id, blob: p.blob, createdAt: Date.now(), updatedAt: Date.now(), deleted: false, uploaded: false });
       }
     }
   }
@@ -620,6 +634,7 @@ async function saveFromForm(e) {
 
   hideModal('#editModal');
   await loadAll();
+  if (window.RestoSync) RestoSync.scheduleSync();
 
   if (mergedInto) {
     const cnt = state.restaurants.filter((r) => (r.groupId || r.id) === groupId).length;
@@ -638,6 +653,7 @@ async function unstack(recordId) {
   await dbPut('restaurants', r);
   hideModal('#detailModal');
   await loadAll();
+  if (window.RestoSync) RestoSync.scheduleSync();
   toast('別の店として分けました');
 }
 
@@ -647,10 +663,13 @@ async function deleteCurrent() {
   const r = state.restaurants.find((x) => x.id === id);
   if (!confirm(`「${r ? r.name : 'この店'}」を写真ごと削除します。よろしい？`)) return;
   const photos = await dbGetByIndex('photos', 'byRestaurant', id);
-  await Promise.all(photos.map((p) => dbDelete('photos', p.id)));
-  await dbDelete('restaurants', id);
+  await Promise.all(photos.map((p) => removePhoto(p.id)));
+  // 論理削除：レコードは残して deleted=true（＝相手端末へ削除を伝えるtombstone）
+  if (r) { r.deleted = true; r.updatedAt = Date.now(); await dbPut('restaurants', r); }
+  else { await dbDelete('restaurants', id); }
   hideModal('#editModal');
   await loadAll();
+  if (window.RestoSync) RestoSync.scheduleSync();
   toast('削除しました');
 }
 
@@ -673,8 +692,27 @@ async function openDetail(gid) {
   const cEl = $('#d_count');
   if (members.length > 1) { cEl.textContent = members.length + '回訪問'; cEl.hidden = false; } else cEl.hidden = true;
 
+  // 公開トグル（"行った"店だけ対象）
+  const pubRow = $('#d_publishRow');
+  if (anyVisited) { pubRow.hidden = false; $('#d_public').checked = members.some((m) => m.isPublic); }
+  else pubRow.hidden = true;
+
   await renderVisits(members);
   showModal('#detailModal');
+}
+
+// 店(グループ)の公開/非公開を切り替え（写真も合わせる）→ 同期
+async function setGroupPublic(gid, on) {
+  if (!gid) return;
+  const members = state.restaurants.filter((r) => (r.groupId || r.id) === gid);
+  for (const r of members) {
+    r.isPublic = on; r.updatedAt = Date.now();
+    await dbPut('restaurants', r);
+    const photos = await dbGetByIndex('photos', 'byRestaurant', r.id);
+    for (const p of photos) { if (!p.deleted) { p.isPublic = on; p.updatedAt = Date.now(); await dbPut('photos', p); } }
+  }
+  if (window.RestoSync) RestoSync.scheduleSync();
+  toast(on ? '公開しました（⋯から共有URLをコピーできます）' : '非公開にしました');
 }
 
 async function renderVisits(members) {
@@ -1063,7 +1101,7 @@ function dataURLtoBlob(dataURL) {
 
 async function exportData() {
   const restaurants = await dbGetAll('restaurants');
-  const photosRaw = await dbGetAll('photos');
+  const photosRaw = (await dbGetAll('photos')).filter((p) => !p.deleted && p.blob);
   const photos = [];
   for (const p of photosRaw) {
     photos.push({ id: p.id, restaurantId: p.restaurantId, createdAt: p.createdAt, dataURL: await blobToDataURL(p.blob) });
@@ -1089,16 +1127,17 @@ async function importData(file) {
   if (!confirm('読み込むと、同じ店・写真は上書き/追加されます。続けますか？')) return;
   for (const r of data.restaurants) await dbPut('restaurants', r);
   for (const p of (data.photos || [])) {
-    await dbPut('photos', { id: p.id, restaurantId: p.restaurantId, createdAt: p.createdAt, blob: dataURLtoBlob(p.dataURL) });
+    await dbPut('photos', { id: p.id, restaurantId: p.restaurantId, createdAt: p.createdAt, updatedAt: p.createdAt || Date.now(), deleted: false, uploaded: false, blob: dataURLtoBlob(p.dataURL) });
   }
   hideModal('#menuModal');
   await loadAll();
+  if (window.RestoSync) RestoSync.scheduleSync();
   toast(`復元しました（店 ${data.restaurants.length} 件）`);
 }
 
 async function updateMenuStat() {
   const r = await dbGetAll('restaurants');
-  const p = await dbGetAll('photos');
+  const p = (await dbGetAll('photos')).filter((x) => !x.deleted);
   let usage = '';
   try {
     if (navigator.storage && navigator.storage.estimate) {
@@ -1172,10 +1211,11 @@ function bindEvents() {
   });
 
   $('#addVisitBtn').addEventListener('click', addVisitToCurrentGroup);
+  $('#d_public').addEventListener('change', (e) => setGroupPublic(state.currentGroupId, e.target.checked));
 
   $('#conquestBtn').addEventListener('click', openConquest);
   $('#conquestToggle').addEventListener('change', (e) => setConquestEnabled(e.target.checked));
-  $('#menuBtn').addEventListener('click', () => { updateMenuStat(); applyConquestVisibility(); showModal('#menuModal'); });
+  $('#menuBtn').addEventListener('click', () => { updateMenuStat(); applyConquestVisibility(); if (window.RestoSync) RestoSync.renderPanel(); showModal('#menuModal'); });
   $('#exportBtn').addEventListener('click', exportData);
   $('#importInput').addEventListener('change', (e) => { if (e.target.files[0]) importData(e.target.files[0]); e.target.value = ''; });
 
@@ -1212,6 +1252,7 @@ async function init() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW登録失敗', e));
   }
+  if (window.RestoSync) { RestoSync.renderPanel(); RestoSync.init(); }
 }
 
 document.addEventListener('DOMContentLoaded', init);
