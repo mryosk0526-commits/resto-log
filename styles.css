@@ -169,8 +169,8 @@ body {
 /* カード：写真を上に載せた縦カードのグリッド（スマホ1列→広幅で複数列） */
 .list.mode-card {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 12px; max-width: 1040px; margin-inline: auto;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px; max-width: 1120px; margin-inline: auto;
 }
 .mode-card .card { flex-direction: column; padding: 0; gap: 0; overflow: hidden; }
 .mode-card .card-thumb { width: 100%; height: 140px; border-radius: 0; }
