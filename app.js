@@ -443,7 +443,7 @@ function buildCard(g) {
 
   const thumb = document.createElement('div');
   thumb.className = 'card-thumb';
-  if (g.thumb) { const im = document.createElement('img'); im.loading = 'lazy'; im.decoding = 'async'; im.src = listURL(g.thumb); im.alt = ''; thumb.appendChild(im); }
+  if (g.thumb) { const im = document.createElement('img'); im.decoding = 'async'; im.src = listURL(g.thumb); im.alt = ''; thumb.appendChild(im); }
   else thumb.textContent = g.status === 'visited' ? '🍽️' : '📍';
 
   const body = document.createElement('div');

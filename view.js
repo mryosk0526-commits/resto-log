@@ -83,7 +83,7 @@
     const card = document.createElement('article'); card.className = 'card'; card.dataset.gid = g.gid;
 
     const thumb = document.createElement('div'); thumb.className = 'card-thumb';
-    if (g.photoIds.length) { const im = document.createElement('img'); im.loading = 'lazy'; im.alt = ''; thumb.appendChild(im); thumbJobs.push({ im, pid: g.photoIds[0] }); }
+    if (g.photoIds.length) { const im = document.createElement('img'); im.decoding = 'async'; im.alt = ''; thumb.appendChild(im); thumbJobs.push({ im, pid: g.photoIds[0] }); }
     else thumb.textContent = '🍽️';
 
     const body = document.createElement('div'); body.className = 'card-body';
