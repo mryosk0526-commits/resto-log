@@ -13,6 +13,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="食べ歩きメモ" />
 
+  <script>try{var t=localStorage.getItem('resto-log-theme');if(t)document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -20,6 +21,7 @@
   <header class="app-header">
     <h1 class="app-title">🍜 食べ歩きメモ</h1>
     <div class="header-actions">
+      <button id="calendarBtn" class="icon-btn" aria-label="カレンダー">📅</button>
       <button id="conquestBtn" class="icon-btn" aria-label="全国制覇">🗾</button>
       <button id="menuBtn" class="icon-btn" aria-label="メニュー">⋯</button>
     </div>
@@ -176,6 +178,11 @@
           <span><b>全国制覇モード</b><small>ヘッダーの🗾ボタンを表示する</small></span>
           <label class="switch"><input type="checkbox" id="conquestToggle" /><span class="slider"></span></label>
         </div>
+        <div class="menu-item toggle-row">
+          <span class="menu-emoji">🌙</span>
+          <span><b>ダークモード</b><small>暗い配色に切り替え</small></span>
+          <label class="switch"><input type="checkbox" id="darkToggle" /><span class="slider"></span></label>
+        </div>
         <div class="menu-stat" id="menuStat"></div>
       </div>
     </div>
@@ -199,6 +206,28 @@
         <div class="cq-map-wrap"><svg id="cq_map" viewBox="0 0 420 360" class="cq-map" xmlns="http://www.w3.org/2000/svg"></svg></div>
         <p class="hint" style="text-align:center">県をタップするとその県の一覧に飛びます</p>
         <div class="cq-regions" id="cq_regions"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== カレンダー ===== -->
+  <div class="modal" id="calendarModal" hidden>
+    <div class="modal-sheet">
+      <div class="modal-head">
+        <h2>📅 カレンダー</h2>
+        <button class="icon-btn" data-close aria-label="閉じる">✕</button>
+      </div>
+      <div class="cal-body">
+        <div class="cal-nav">
+          <button id="cal_prev" aria-label="前の月">‹</button>
+          <div class="cal-title-wrap">
+            <div class="cal-title" id="cal_title"></div>
+            <div class="cal-monthcount" id="cal_monthcount"></div>
+          </div>
+          <button id="cal_next" aria-label="次の月">›</button>
+        </div>
+        <div class="cal-grid" id="cal_grid"></div>
+        <div class="cal-day" id="cal_day"></div>
       </div>
     </div>
   </div>

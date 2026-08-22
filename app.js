@@ -283,6 +283,7 @@ const state = {
   sortMode: 'reg',   // reg / date_desc / date_asc / pref / genre
   currentGroupId: null, // 詳細表示中のグループid
   filterBeforeConquest: null, // 制覇画面に入る前のフィルタ（閉じたら戻す）
+  cal: { y: null, m: null, sel: null }, // カレンダー: 表示中の年/月(0-11)・選択中の日付(YYYY-MM-DD)
   // 編集フォームの写真ステージング
   form: { photos: [], removed: [], dateManual: false }, // photos: {key, blob, dbId|null}
 };
@@ -1033,6 +1034,131 @@ function setConquestEnabled(on) {
   applyConquestVisibility();
 }
 
+/* ---------- カレンダー ---------- */
+// 「行った」記録を日付(YYYY-MM-DD・無ければ登録日)ごとにまとめる
+function visitsByDate() {
+  const map = {};
+  for (const r of state.restaurants) {
+    if (r.status !== 'visited') continue;
+    const ds = r.date || dateToStr(r.createdAt);
+    if (!ds) continue;
+    (map[ds] = map[ds] || []).push(r);
+  }
+  return map;
+}
+
+function openCalendar() {
+  if (state.cal.y == null) {
+    const now = new Date();
+    state.cal.y = now.getFullYear();
+    state.cal.m = now.getMonth();
+  }
+  state.cal.sel = null;
+  renderCalendar();
+  showModal('#calendarModal');
+}
+
+function shiftCalMonth(delta) {
+  let { y, m } = state.cal;
+  m += delta;
+  if (m < 0) { m = 11; y--; }
+  else if (m > 11) { m = 0; y++; }
+  state.cal.y = y; state.cal.m = m; state.cal.sel = null;
+  renderCalendar();
+}
+
+function selectCalDay(ds) {
+  state.cal.sel = (state.cal.sel === ds) ? null : ds;
+  renderCalendar();
+}
+
+function renderCalendar() {
+  const { y, m } = state.cal;
+  const byDate = visitsByDate();
+  const prefix = `${y}-${String(m + 1).padStart(2, '0')}`;
+
+  $('#cal_title').textContent = `${y}年${m + 1}月`;
+  let monthCount = 0;
+  for (const ds in byDate) if (ds.startsWith(prefix + '-')) monthCount += byDate[ds].length;
+  $('#cal_monthcount').textContent = monthCount ? `この月 ${monthCount}件の記録` : 'この月は記録なし';
+
+  const grid = $('#cal_grid');
+  grid.innerHTML = '';
+  for (const w of ['日', '月', '火', '水', '木', '金', '土']) {
+    const c = document.createElement('div'); c.className = 'cal-wd'; c.textContent = w; grid.appendChild(c);
+  }
+  const first = new Date(y, m, 1).getDay();
+  const days = new Date(y, m + 1, 0).getDate();
+  const today = todayStr();
+  for (let i = 0; i < first; i++) {
+    const c = document.createElement('div'); c.className = 'cal-cell cal-empty'; grid.appendChild(c);
+  }
+  for (let d = 1; d <= days; d++) {
+    const ds = `${prefix}-${String(d).padStart(2, '0')}`;
+    const items = byDate[ds] || [];
+    const cell = document.createElement('button');
+    cell.type = 'button';
+    cell.className = 'cal-cell' + (items.length ? ' has' : '') + (ds === today ? ' today' : '') + (ds === state.cal.sel ? ' sel' : '');
+    const dn = document.createElement('span'); dn.className = 'cal-daynum'; dn.textContent = d;
+    cell.appendChild(dn);
+    if (items.length) {
+      const dot = document.createElement('span'); dot.className = 'cal-dot';
+      dot.textContent = items.length > 1 ? items.length : '';
+      cell.appendChild(dot);
+      cell.addEventListener('click', () => selectCalDay(ds));
+    } else {
+      cell.disabled = true;
+    }
+    grid.appendChild(cell);
+  }
+  renderCalDay(byDate);
+}
+
+function renderCalDay(byDate) {
+  byDate = byDate || visitsByDate();
+  const panel = $('#cal_day');
+  panel.innerHTML = '';
+  const ds = state.cal.sel;
+  if (!ds) {
+    const p = document.createElement('p'); p.className = 'cal-hint';
+    p.textContent = '日付をタップすると、その日に行ったお店が出ます';
+    panel.appendChild(p);
+    return;
+  }
+  const items = (byDate[ds] || []).slice().sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ja'));
+  const head = document.createElement('div'); head.className = 'cal-day-head';
+  head.textContent = `${ds.replace(/-/g, '/')}（${items.length}件）`;
+  panel.appendChild(head);
+  for (const r of items) {
+    const gid = r.groupId || r.id;
+    const row = document.createElement('button'); row.type = 'button'; row.className = 'cal-day-item';
+    const em = document.createElement('span'); em.className = 'cal-day-emoji'; em.textContent = '🍽️';
+    const nm = document.createElement('span'); nm.className = 'cal-day-name'; nm.textContent = r.name;
+    const wrap = document.createElement('span');
+    wrap.appendChild(nm);
+    if (r.prefecture) { const pf = document.createElement('span'); pf.className = 'cal-day-pref'; pf.textContent = r.prefecture; wrap.appendChild(pf); }
+    row.appendChild(em); row.appendChild(wrap);
+    row.addEventListener('click', () => { hideModal('#calendarModal'); openDetail(gid); });
+    panel.appendChild(row);
+  }
+}
+
+/* ---------- ダークモード（システム連動＋手動トグル） ---------- */
+const THEME_KEY = 'resto-log-theme';
+function storedTheme() { try { return localStorage.getItem(THEME_KEY); } catch (_) { return null; } }
+function systemDark() { return !!(window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches); }
+function effectiveDark() { const t = storedTheme(); return t ? t === 'dark' : systemDark(); }
+function applyTheme() {
+  const t = storedTheme(); const root = document.documentElement;
+  if (t) root.setAttribute('data-theme', t); else root.removeAttribute('data-theme');
+}
+function setDark(on) {
+  try { localStorage.setItem(THEME_KEY, on ? 'dark' : 'light'); } catch (_) {}
+  applyTheme();
+  const tg = $('#darkToggle'); if (tg) tg.checked = on;
+}
+function applyThemeToggleState() { const tg = $('#darkToggle'); if (tg) tg.checked = effectiveDark(); }
+
 function resetStatusTabTo(status) {
   state.filterStatus = status;
   document.querySelectorAll('#statusTabs .tab').forEach((t) => t.classList.toggle('is-active', t.dataset.status === status));
@@ -1215,7 +1341,11 @@ function bindEvents() {
 
   $('#conquestBtn').addEventListener('click', openConquest);
   $('#conquestToggle').addEventListener('change', (e) => setConquestEnabled(e.target.checked));
-  $('#menuBtn').addEventListener('click', () => { updateMenuStat(); applyConquestVisibility(); if (window.RestoSync) RestoSync.renderPanel(); showModal('#menuModal'); });
+  $('#calendarBtn').addEventListener('click', openCalendar);
+  $('#cal_prev').addEventListener('click', () => shiftCalMonth(-1));
+  $('#cal_next').addEventListener('click', () => shiftCalMonth(1));
+  $('#darkToggle').addEventListener('change', (e) => setDark(e.target.checked));
+  $('#menuBtn').addEventListener('click', () => { updateMenuStat(); applyConquestVisibility(); applyThemeToggleState(); if (window.RestoSync) RestoSync.renderPanel(); showModal('#menuModal'); });
   $('#exportBtn').addEventListener('click', exportData);
   $('#importInput').addEventListener('change', (e) => { if (e.target.files[0]) importData(e.target.files[0]); e.target.value = ''; });
 
@@ -1239,10 +1369,12 @@ function bindEvents() {
 }
 
 async function init() {
+  applyTheme();
   initPrefOptions();
   initGenreOptions();
   bindEvents();
   applyConquestVisibility();
+  applyThemeToggleState();
   try {
     await loadAll();
   } catch (err) {
