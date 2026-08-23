@@ -913,12 +913,12 @@ function closeLightbox() {
   }
 }
 
-// dir: +1 次へ / -1 前へ。端なら弾んで戻る
+// dir: +1 次へ / -1 前へ。端はループ（最後→最初 / 最初→最後）
 function lbNav(dir) {
   const n = lb.photos.length;
-  const i = lb.index + dir;
+  if (n < 2) return;
+  const i = (lb.index + dir + n) % n;
   animateLb(true);
-  if (i < 0 || i >= n) { lb.tx = 0; applyLb(); return; }
   loadLbPhoto(i);
 }
 
