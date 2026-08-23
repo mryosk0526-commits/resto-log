@@ -29,6 +29,7 @@
 
   <!-- ===== フィルタバー ===== -->
   <div class="filterbar">
+    <input type="search" id="searchInput" class="search-input" placeholder="店名・メモで検索" aria-label="店名・メモで検索" />
     <div class="tabs" id="statusTabs">
       <button class="tab is-active" data-status="all">すべて</button>
       <button class="tab" data-status="want">行きたい</button>
@@ -45,6 +46,7 @@
         <option value="reg">登録順</option>
         <option value="date_desc">日付が新しい順</option>
         <option value="date_asc">日付が古い順</option>
+        <option value="rating">評価が高い順</option>
         <option value="pref">都道府県順</option>
         <option value="genre">ジャンル順</option>
       </select>
@@ -118,6 +120,10 @@
           <span class="label">日付 <small id="f_dateNote"></small></span>
           <input type="date" id="f_date" />
         </label>
+        <fieldset class="field" id="ratingField">
+          <span class="label">評価 <small id="f_ratingNote"></small></span>
+          <div class="rating-input" id="f_rating"></div>
+        </fieldset>
         <fieldset class="field" id="photoField">
           <span class="label">写真 <small id="f_photocount"></small></span>
           <div class="photo-grid" id="f_photoGrid"></div>
@@ -226,15 +232,22 @@
         <button class="icon-btn" data-close aria-label="閉じる">✕</button>
       </div>
       <div class="cal-body">
+        <div class="cal-seg-wrap">
+          <div class="cal-seg" id="cal_seg" role="group" aria-label="月/年切替">
+            <button data-cmode="month" class="is-active">月</button>
+            <button data-cmode="year">年</button>
+          </div>
+        </div>
         <div class="cal-nav">
-          <button id="cal_prev" aria-label="前の月">‹</button>
+          <button id="cal_prev" aria-label="前へ">‹</button>
           <div class="cal-title-wrap">
             <div class="cal-title" id="cal_title"></div>
             <div class="cal-monthcount" id="cal_monthcount"></div>
           </div>
-          <button id="cal_next" aria-label="次の月">›</button>
+          <button id="cal_next" aria-label="次へ">›</button>
         </div>
         <div class="cal-grid" id="cal_grid"></div>
+        <div class="cal-year" id="cal_year" hidden></div>
         <div class="cal-day" id="cal_day"></div>
       </div>
     </div>
@@ -243,9 +256,11 @@
   <!-- ===== 写真の拡大表示（ピンチ/パン） ===== -->
   <div class="lightbox" id="lightbox" hidden>
     <button class="lightbox-close" id="lightboxClose" aria-label="閉じる">✕</button>
+    <button class="lightbox-nav prev" id="lightboxPrev" aria-label="前の写真" hidden>‹</button>
+    <button class="lightbox-nav next" id="lightboxNext" aria-label="次の写真" hidden>›</button>
     <span class="lightbox-count" id="lightboxCount"></span>
     <img id="lightboxImg" alt="" draggable="false" />
-    <p class="lightbox-hint">スワイプで次の写真・ピンチで拡大・空いた所をタップで閉じる</p>
+    <p class="lightbox-hint">◀▶・スワイプ・矢印キーで送る／ピンチで拡大／空いた所をタップで閉じる</p>
   </div>
 
   <!-- ===== トースト ===== -->

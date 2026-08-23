@@ -44,6 +44,7 @@
     return {
       id: row.id, name: row.name, prefecture: row.prefecture, groupId: row.group_id,
       genre: row.genre, url: row.url, memo: row.memo, status: row.status, date: row.date,
+      rating: row.rating || 0,
       createdAt: row.created_at, updatedAt: row.updated_at, deleted: !!row.deleted, isPublic: !!row.is_public,
     };
   }
@@ -51,6 +52,7 @@
     return {
       id: r.id, user_id: userId, name: r.name, prefecture: r.prefecture, group_id: r.groupId || r.id,
       genre: r.genre || '', url: r.url || '', memo: r.memo || '', status: r.status || 'want',
+      rating: r.rating || 0,
       date: r.date || '', created_at: r.createdAt || Date.now(),
       updated_at: r.updatedAt || r.createdAt || Date.now(), deleted: !!r.deleted, is_public: !!r.isPublic,
     };

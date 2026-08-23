@@ -279,15 +279,16 @@ const state = {
   filterStatus: 'all',
   filterPref: '',
   filterGenre: '',
+  filterQuery: '',   // フリーワード検索（店名＋メモ）
   filterRegion: '',  // 地方でまとめて絞り込み（全国制覇から）
   sortMode: 'reg',   // reg / date_desc / date_asc / pref / genre
   currentGroupId: null, // 詳細表示中のグループid
   filterBeforeConquest: null, // 制覇画面に入る前のフィルタ（閉じたら戻す）
-  cal: { y: null, m: null, sel: null }, // カレンダー: 表示中の年/月(0-11)・選択中の日付(YYYY-MM-DD)
+  cal: { y: null, m: null, sel: null, mode: 'month' }, // カレンダー: 年/月(0-11)・選択日・表示(month/year)
   viewMode: 'card',  // 表示モード: list / card / gallery
   view: { groups: [], rendered: 0 }, // 一覧の段階描画（無限スクロール）
   // 編集フォームの写真ステージング
-  form: { photos: [], removed: [], dateManual: false }, // photos: {key, blob, dbId|null}
+  form: { photos: [], removed: [], dateManual: false, rating: 0 }, // photos: {key, blob, dbId|null}
 };
 
 /* ---------- 読み込み ---------- */
@@ -350,10 +351,12 @@ function buildGroups() {
     const number = Math.min(...members.map((m) => state.regNumbers[m.id] || 1e9));
     let thumb = null;
     for (const m of members) { if (state.firstPhoto[m.id]) { thumb = state.firstPhoto[m.id]; break; } }
+    const rating = members.reduce((mx, m) => Math.max(mx, m.rating || 0), 0);
+    const searchText = (latest.name + ' ' + members.map((m) => m.memo || '').join(' ') + ' ' + (rep.genre || '') + ' ' + (latest.prefecture || '')).toLowerCase();
     groups.push({
       gid, members,
       name: latest.name, prefecture: latest.prefecture || '', genre: rep.genre || '',
-      count: members.length, number,
+      count: members.length, number, rating, searchText,
       latestDate: displayDate(latest), latestSort: visitTime(latest),
       status: members.some((m) => m.status === 'visited') ? 'visited' : 'want',
       totalPhotos, thumb, memo: latest.memo || '',
@@ -366,6 +369,7 @@ function sortGroups(groups) {
   switch (state.sortMode) {
     case 'date_desc': groups.sort((a, b) => b.latestSort - a.latestSort); break;
     case 'date_asc':  groups.sort((a, b) => a.latestSort - b.latestSort); break;
+    case 'rating':    groups.sort((a, b) => (b.rating - a.rating) || (b.number - a.number)); break;
     case 'pref':      groups.sort((a, b) => (a.prefecture || '￿').localeCompare(b.prefecture || '￿', 'ja') || b.number - a.number); break;
     case 'genre':     groups.sort((a, b) => (a.genre || '￿').localeCompare(b.genre || '￿', 'ja') || b.number - a.number); break;
     case 'reg':
@@ -375,6 +379,12 @@ function sortGroups(groups) {
 
 /* ---------- 一覧描画 ---------- */
 function chip(text) { const c = document.createElement('span'); c.className = 'chip'; c.textContent = text; return c; }
+
+function makeStars(n) {
+  const w = document.createElement('span'); w.className = 'stars';
+  for (let i = 1; i <= 5; i++) { const s = document.createElement('span'); s.className = 's' + (i <= n ? ' on' : ''); s.textContent = '★'; w.appendChild(s); }
+  return w;
+}
 
 function statusBadge(status) {
   const b = document.createElement('span');
@@ -399,6 +409,8 @@ function render() {
     groups = groups.filter((g) => g.prefecture === state.filterPref);
   }
   if (state.filterGenre) groups = groups.filter((g) => g.genre === state.filterGenre);
+  const q = state.filterQuery.trim().toLowerCase();
+  if (q) groups = groups.filter((g) => g.searchText.includes(q));
   sortGroups(groups);
   updateActiveFilterBar();
 
@@ -466,6 +478,7 @@ function buildCard(g) {
   const sub = document.createElement('div');
   sub.className = 'card-sub';
   sub.appendChild(statusBadge(g.status));
+  if (g.rating) sub.appendChild(makeStars(g.rating));
   if (g.genre) sub.appendChild(chip(g.genre));
   if (g.prefecture) sub.appendChild(chip(g.prefecture));
   if (g.latestDate) sub.appendChild(chip('📅 ' + g.latestDate));
@@ -505,6 +518,10 @@ async function openEdit(r, prefill) {
   $('#f_dateNote').textContent = '';
   // 手入力があるまでは、写真を足したら撮影日で上書きしてよい（既存店でも）
   state.form.dateManual = false;
+
+  // 評価
+  state.form.rating = r ? (r.rating || 0) : 0;
+  renderFormStars();
 
   // 写真ステージングを初期化（既存店なら現在の写真を読み込む）
   state.form.photos = [];
@@ -607,6 +624,22 @@ async function addFormPhotos(files) {
   else if (fail) toast(`写真を取り込めませんでした（形式かサイズを確認）`);
 }
 
+function renderFormStars() {
+  const wrap = $('#f_rating');
+  wrap.innerHTML = '';
+  const n = state.form.rating || 0;
+  for (let i = 1; i <= 5; i++) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = i <= n ? 'on' : '';
+    b.textContent = '★';
+    b.setAttribute('aria-label', i + '点');
+    b.addEventListener('click', () => { state.form.rating = (state.form.rating === i) ? 0 : i; renderFormStars(); });
+    wrap.appendChild(b);
+  }
+  $('#f_ratingNote').textContent = n ? n + ' / 5' : '未評価';
+}
+
 async function saveFromForm(e) {
   e.preventDefault();
   const name = $('#f_name').value.trim();
@@ -641,6 +674,7 @@ async function saveFromForm(e) {
     genre: $('#f_genre').value,
     url: $('#f_url').value.trim(),
     memo: $('#f_memo').value.trim(),
+    rating: state.form.rating || 0,
     status,
     date: $('#f_date').value || (existing && existing.date) || todayStr(),
     createdAt: existing ? existing.createdAt : Date.now(),
@@ -853,6 +887,8 @@ function loadLbPhoto(i) {
   applyLb();
   const n = lb.photos.length;
   $('#lightboxCount').textContent = n > 1 ? `${i + 1} / ${n}` : '';
+  $('#lightboxPrev').hidden = n < 2;
+  $('#lightboxNext').hidden = n < 2;
 }
 
 // blobs: この店の全写真, index: 開始位置
@@ -893,6 +929,14 @@ function touchDist(t) {
 function bindLightbox() {
   const box = $('#lightbox');
   $('#lightboxClose').addEventListener('click', closeLightbox);
+  $('#lightboxPrev').addEventListener('click', (e) => { e.stopPropagation(); lbNav(-1); });
+  $('#lightboxNext').addEventListener('click', (e) => { e.stopPropagation(); lbNav(1); });
+  document.addEventListener('keydown', (e) => {
+    if ($('#lightbox').hidden) return;
+    if (e.key === 'ArrowLeft') lbNav(-1);
+    else if (e.key === 'ArrowRight') lbNav(1);
+    else if (e.key === 'Escape') closeLightbox();
+  });
 
   box.addEventListener('touchstart', (e) => {
     animateLb(false);
@@ -1090,11 +1134,21 @@ function openCalendar() {
 }
 
 function shiftCalMonth(delta) {
+  if (state.cal.mode === 'year') {
+    state.cal.y += delta; state.cal.sel = null; renderCalendar(); return;
+  }
   let { y, m } = state.cal;
   m += delta;
   if (m < 0) { m = 11; y--; }
   else if (m > 11) { m = 0; y++; }
   state.cal.y = y; state.cal.m = m; state.cal.sel = null;
+  renderCalendar();
+}
+
+function setCalMode(mode) {
+  if (mode !== 'month' && mode !== 'year') return;
+  state.cal.mode = mode;
+  state.cal.sel = null;
   renderCalendar();
 }
 
@@ -1104,6 +1158,15 @@ function selectCalDay(ds) {
 }
 
 function renderCalendar() {
+  const monthMode = state.cal.mode !== 'year';
+  $('#cal_grid').hidden = !monthMode;
+  $('#cal_day').hidden = !monthMode;
+  $('#cal_year').hidden = monthMode;
+  document.querySelectorAll('#cal_seg button').forEach((b) => b.classList.toggle('is-active', b.dataset.cmode === state.cal.mode));
+  if (monthMode) renderMonth(); else renderYear();
+}
+
+function renderMonth() {
   const { y, m } = state.cal;
   const byDate = visitsByDate();
   const prefix = `${y}-${String(m + 1).padStart(2, '0')}`;
@@ -1171,6 +1234,48 @@ function renderCalDay(byDate) {
     row.appendChild(em); row.appendChild(wrap);
     row.addEventListener('click', () => { hideModal('#calendarModal'); openDetail(gid); });
     panel.appendChild(row);
+  }
+}
+
+// 年間表示：12か月ミニグリッド（行った日をマーク・月タップで月表示へ）
+function renderYear() {
+  const y = state.cal.y;
+  const byDate = visitsByDate();
+  const today = todayStr();
+  $('#cal_title').textContent = `${y}年`;
+  let yearCount = 0;
+  for (const ds in byDate) if (ds.startsWith(y + '-')) yearCount += byDate[ds].length;
+  $('#cal_monthcount').textContent = yearCount ? `この年 ${yearCount}件の記録` : 'この年は記録なし';
+
+  const yc = $('#cal_year');
+  yc.innerHTML = '';
+  const MONTHS = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
+  for (let m = 0; m < 12; m++) {
+    const prefix = `${y}-${String(m + 1).padStart(2, '0')}`;
+    let mc = 0;
+    for (const ds in byDate) if (ds.startsWith(prefix + '-')) mc += byDate[ds].length;
+
+    const mini = document.createElement('div'); mini.className = 'cal-mini';
+    const title = document.createElement('div'); title.className = 'cal-mini-title';
+    title.textContent = MONTHS[m];
+    if (mc) { const s = document.createElement('small'); s.textContent = mc; title.appendChild(s); }
+    mini.appendChild(title);
+
+    const grid = document.createElement('div'); grid.className = 'cal-mini-grid';
+    const first = new Date(y, m, 1).getDay();
+    const days = new Date(y, m + 1, 0).getDate();
+    for (let i = 0; i < first; i++) { const c = document.createElement('span'); c.className = 'cal-mini-day'; grid.appendChild(c); }
+    for (let d = 1; d <= days; d++) {
+      const ds = `${prefix}-${String(d).padStart(2, '0')}`;
+      const has = !!(byDate[ds] && byDate[ds].length);
+      const c = document.createElement('span');
+      c.className = 'cal-mini-day' + (has ? ' has' : '') + (ds === today ? ' today' : '');
+      c.textContent = d;
+      grid.appendChild(c);
+    }
+    mini.appendChild(grid);
+    mini.addEventListener('click', () => { state.cal.m = m; state.cal.sel = null; setCalMode('month'); });
+    yc.appendChild(mini);
   }
 }
 
@@ -1386,6 +1491,7 @@ function bindEvents() {
     state.filterBeforeConquest = null; render();
   });
   $('#genreFilter').addEventListener('change', (e) => { state.filterGenre = e.target.value; state.filterBeforeConquest = null; render(); });
+  $('#searchInput').addEventListener('input', (e) => { state.filterQuery = e.target.value; state.filterBeforeConquest = null; render(); });
   $('#sortSelect').addEventListener('change', (e) => { state.sortMode = e.target.value; state.filterBeforeConquest = null; render(); });
   $('#activeFilterClear').addEventListener('click', () => {
     state.filterRegion = ''; state.filterBeforeConquest = null; render();
@@ -1399,6 +1505,7 @@ function bindEvents() {
   $('#calendarBtn').addEventListener('click', openCalendar);
   $('#cal_prev').addEventListener('click', () => shiftCalMonth(-1));
   $('#cal_next').addEventListener('click', () => shiftCalMonth(1));
+  $('#cal_seg').addEventListener('click', (e) => { const b = e.target.closest('button[data-cmode]'); if (b) setCalMode(b.dataset.cmode); });
   $('#darkToggle').addEventListener('change', (e) => setDark(e.target.checked));
   $('#viewModes').addEventListener('click', (e) => { const b = e.target.closest('.vm'); if (b) setViewMode(b.dataset.mode); });
 

@@ -36,9 +36,11 @@
   <!-- 写真の拡大表示 -->
   <div class="lightbox" id="lightbox" hidden>
     <button class="lightbox-close" id="lightboxClose" aria-label="閉じる">✕</button>
+    <button class="lightbox-nav prev" id="lightboxPrev" aria-label="前の写真" hidden>‹</button>
+    <button class="lightbox-nav next" id="lightboxNext" aria-label="次の写真" hidden>›</button>
     <span class="lightbox-count" id="lightboxCount"></span>
     <img id="lightboxImg" alt="" draggable="false" />
-    <p class="lightbox-hint">スワイプ／矢印で送る・背景タップで閉じる</p>
+    <p class="lightbox-hint">◀▶・スワイプ・矢印で送る／背景タップで閉じる</p>
   </div>
 
   <script src="vendor/supabase.min.js"></script>

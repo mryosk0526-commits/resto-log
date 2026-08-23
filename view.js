@@ -119,10 +119,19 @@
     const u = await getPhotoURL(lbList[lbIdx]);
     if (u && lb && !lb.hidden) lbImg.src = u;
   }
-  async function openLightbox(ids) { lbList = ids; lbIdx = 0; lb.hidden = false; document.body.style.overflow = 'hidden'; await showLb(); }
+  const lbPrev = document.getElementById('lightboxPrev');
+  const lbNext = document.getElementById('lightboxNext');
+  async function openLightbox(ids) {
+    lbList = ids; lbIdx = 0; lb.hidden = false; document.body.style.overflow = 'hidden';
+    const multi = lbList.length > 1;
+    lbPrev.hidden = !multi; lbNext.hidden = !multi;
+    await showLb();
+  }
   function closeLb() { lb.hidden = true; document.body.style.overflow = ''; }
   function nav(d) { if (lbList.length < 2) return; lbIdx = (lbIdx + d + lbList.length) % lbList.length; showLb(); }
   document.getElementById('lightboxClose').addEventListener('click', closeLb);
+  lbPrev.addEventListener('click', (e) => { e.stopPropagation(); nav(-1); });
+  lbNext.addEventListener('click', (e) => { e.stopPropagation(); nav(1); });
   lb.addEventListener('click', (e) => { if (e.target === lb) closeLb(); });
   let sx = null;
   lb.addEventListener('touchstart', (e) => { sx = e.touches[0].clientX; }, { passive: true });
