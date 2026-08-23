@@ -905,6 +905,15 @@ function closeLightbox() {
   if (box.hidden) return;
   lb.closedAt = Date.now(); // 直後の背景タップ貫通で下のモーダルを閉じさせない
   box.hidden = true;
+  // ゴーストクリック対策：閉じたタップの直後（touch/mouseの約300ms後）に発火する合成clickが、
+  // 下のモーダルの✕([data-close])等に当たって誤爆するのを、キャプチャ段階で1回だけ握りつぶす。
+  // （.modal背景だけでなく[data-close]ボタンも守る＝保存前の入力を吹き飛ばさない）
+  const swallowGhost = (ev) => {
+    ev.stopPropagation(); ev.preventDefault();
+    document.removeEventListener('click', swallowGhost, true);
+  };
+  document.addEventListener('click', swallowGhost, true);
+  setTimeout(() => document.removeEventListener('click', swallowGhost, true), 500);
   $('#lightboxImg').src = '';
   if (lb.url) { URL.revokeObjectURL(lb.url); lb.url = null; }
   lb.photos = [];
