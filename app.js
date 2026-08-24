@@ -478,7 +478,6 @@ function buildCard(g) {
   const sub = document.createElement('div');
   sub.className = 'card-sub';
   sub.appendChild(statusBadge(g.status));
-  if (g.rating) sub.appendChild(makeStars(g.rating));
   if (g.genre) sub.appendChild(chip(g.genre));
   if (g.prefecture) sub.appendChild(chip(g.prefecture));
   if (g.latestDate) sub.appendChild(chip('📅 ' + g.latestDate));
@@ -486,6 +485,7 @@ function buildCard(g) {
 
   body.appendChild(name);
   body.appendChild(sub);
+  if (g.rating) { const rs = makeStars(g.rating); rs.classList.add('card-stars'); body.appendChild(rs); }
   if (g.memo) { const m = document.createElement('p'); m.className = 'card-memo'; m.textContent = g.memo; body.appendChild(m); }
 
   card.appendChild(thumb);
@@ -502,6 +502,7 @@ async function openEdit(r, prefill) {
     toast(`登録は${MAX_STORES}件までです。古い店を整理してね`);
     return;
   }
+  state.detailFrom = null; // 編集へ進むときは「閉じたらカレンダーに戻す」を解除
   $('#editTitle').textContent = r ? '店を編集' : (prefill ? 'もう1回来た（訪問を追加）' : '店を追加');
   $('#f_id').value = r ? r.id : '';
   $('#f_name').value = r ? r.name : (prefill ? prefill.name : '');
@@ -740,9 +741,10 @@ async function deleteCurrent() {
 }
 
 /* ---------- 詳細（グループ＝複数訪問をまとめて表示） ---------- */
-async function openDetail(gid) {
+async function openDetail(gid, from) {
   const members = groupMembers(gid);
   if (!members.length) return;
+  state.detailFrom = from === 'calendar' ? 'calendar' : 'list';
   state.currentGroupId = gid;
   const rep = members.find((m) => m.genre) || members[0];
 
@@ -800,6 +802,7 @@ async function renderVisits(members) {
     left.className = 'visit-head-left';
     left.appendChild(chip('#' + (state.regNumbers[r.id] || '?')));
     left.appendChild(statusBadge(r.status));
+    if (r.rating) left.appendChild(makeStars(r.rating));
     const ds = displayDate(r);
     if (ds) { const d = document.createElement('span'); d.className = 'visit-date'; d.textContent = '📅 ' + ds; left.appendChild(d); }
     head.appendChild(left);
@@ -1241,7 +1244,7 @@ function renderCalDay(byDate) {
     wrap.appendChild(nm);
     if (r.prefecture) { const pf = document.createElement('span'); pf.className = 'cal-day-pref'; pf.textContent = r.prefecture; wrap.appendChild(pf); }
     row.appendChild(em); row.appendChild(wrap);
-    row.addEventListener('click', () => { hideModal('#calendarModal'); openDetail(gid); });
+    row.addEventListener('click', () => { hideModal('#calendarModal'); openDetail(gid, 'calendar'); });
     panel.appendChild(row);
   }
 }
@@ -1451,6 +1454,16 @@ function hideModal(sel) {
   document.body.style.overflow = '';
   if (sel === '#editModal' || sel === '#detailModal') revokeViewURLs();
 }
+// モーダルを閉じる共通処理。詳細をカレンダー経由で開いていたら、閉じたらカレンダーに戻す。
+function dismissModal(id) {
+  if (id === 'conquestModal') restoreFromConquest(); // 制覇を閉じたら元のフィルタに戻す
+  hideModal('#' + id);
+  if (id === 'detailModal' && state.detailFrom === 'calendar') {
+    state.detailFrom = null;
+    showModal('#calendarModal');
+    renderCalendar();
+  }
+}
 
 /* ---------- 初期化 ---------- */
 function initPrefOptions() {
@@ -1531,20 +1544,13 @@ function bindEvents() {
   $('#importInput').addEventListener('change', (e) => { if (e.target.files[0]) importData(e.target.files[0]); e.target.value = ''; });
 
   document.querySelectorAll('[data-close]').forEach((b) =>
-    b.addEventListener('click', (e) => {
-      const id = e.target.closest('.modal').id;
-      if (id === 'conquestModal') restoreFromConquest(); // 制覇を閉じたら元のフィルタに戻す
-      hideModal('#' + id);
-    })
+    b.addEventListener('click', (e) => dismissModal(e.target.closest('.modal').id))
   );
   document.querySelectorAll('.modal').forEach((m) =>
     m.addEventListener('click', (e) => {
       // 拡大表示を閉じた直後のタップ貫通では閉じない（保存前の入力を守る）
       if (Date.now() - lb.closedAt < 500) return;
-      if (e.target === m) {
-        if (m.id === 'conquestModal') restoreFromConquest();
-        hideModal('#' + m.id);
-      }
+      if (e.target === m) dismissModal(m.id);
     })
   );
 }
