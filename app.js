@@ -502,7 +502,6 @@ async function openEdit(r, prefill) {
     toast(`登録は${MAX_STORES}件までです。古い店を整理してね`);
     return;
   }
-  state.detailFrom = null; // 編集へ進むときは「閉じたらカレンダーに戻す」を解除
   $('#editTitle').textContent = r ? '店を編集' : (prefill ? 'もう1回来た（訪問を追加）' : '店を追加');
   $('#f_id').value = r ? r.id : '';
   $('#f_name').value = r ? r.name : (prefill ? prefill.name : '');
@@ -534,7 +533,7 @@ async function openEdit(r, prefill) {
   renderFormPhotos();
   updatePhotoFieldVisibility();
 
-  showModal('#editModal');
+  openModal('editModal');
   if (!r) setTimeout(() => $('#f_name').focus(), 100);
 }
 
@@ -699,8 +698,9 @@ async function saveFromForm(e) {
   state.form.photos = [];
   state.form.removed = [];
 
-  hideModal('#editModal');
+  state.detailDirty = true; // 保存後に詳細へ戻るとき最新表示させる
   await loadAll();
+  closeModal();
   if (window.RestoSync) RestoSync.scheduleSync();
 
   if (mergedInto) {
@@ -718,7 +718,6 @@ async function unstack(recordId) {
   r.groupId = r.id;
   r.updatedAt = Date.now();
   await dbPut('restaurants', r);
-  hideModal('#detailModal');
   await loadAll();
   if (window.RestoSync) RestoSync.scheduleSync();
   toast('別の店として分けました');
@@ -734,17 +733,27 @@ async function deleteCurrent() {
   // 論理削除：レコードは残して deleted=true（＝相手端末へ削除を伝えるtombstone）
   if (r) { r.deleted = true; r.updatedAt = Date.now(); await dbPut('restaurants', r); }
   else { await dbDelete('restaurants', id); }
-  hideModal('#editModal');
+  state.detailDirty = true;
   await loadAll();
+  closeModal();
   if (window.RestoSync) RestoSync.scheduleSync();
   toast('削除しました');
 }
 
 /* ---------- 詳細（グループ＝複数訪問をまとめて表示） ---------- */
-async function openDetail(gid, from) {
+async function openDetail(gid) {
+  if (!(await renderDetail(gid))) return;
+  openModal('detailModal', { onReveal: () => {
+    // 下から出し直すとき：店が消えていたら詳細も閉じる／編集で変わっていたら再描画
+    if (!groupMembers(gid).length) { setTimeout(() => { const t = stackTop(); if (t && t.id === 'detailModal') closeModal(); }, 0); return; }
+    if (state.detailDirty) { state.detailDirty = false; renderDetail(gid); }
+  } });
+}
+
+// #detailModal の中身を描画（データ更新後の再描画にも流用）。店が無ければ false。
+async function renderDetail(gid) {
   const members = groupMembers(gid);
-  if (!members.length) return;
-  state.detailFrom = from === 'calendar' ? 'calendar' : 'list';
+  if (!members.length) return false;
   state.currentGroupId = gid;
   const rep = members.find((m) => m.genre) || members[0];
 
@@ -766,7 +775,7 @@ async function openDetail(gid, from) {
   else pubRow.hidden = true;
 
   await renderVisits(members);
-  showModal('#detailModal');
+  return true;
 }
 
 // 店(グループ)の公開/非公開を切り替え（写真も合わせる）→ 同期
@@ -812,13 +821,13 @@ async function renderVisits(members) {
     const editB = document.createElement('button');
     editB.className = 'btn tiny';
     editB.textContent = '編集';
-    editB.addEventListener('click', () => { hideModal('#detailModal'); openEdit(r); });
+    editB.addEventListener('click', () => openEdit(r));
     actions.appendChild(editB);
     if (multi) {
       const sep = document.createElement('button');
       sep.className = 'btn tiny ghost';
       sep.textContent = '別の店に分ける';
-      sep.addEventListener('click', () => unstack(r.id));
+      sep.addEventListener('click', async () => { await unstack(r.id); closeModal(); });
       actions.appendChild(sep);
     }
     head.appendChild(actions);
@@ -858,7 +867,6 @@ function addVisitToCurrentGroup() {
   const members = groupMembers(state.currentGroupId);
   if (!members.length) return;
   const base = members[0];
-  hideModal('#detailModal');
   openEdit(null, { name: base.name, prefecture: base.prefecture || '', genre: base.genre || '' });
 }
 
@@ -899,30 +907,14 @@ function openLightbox(blobs, index) {
   lb.photos = blobs.slice();
   animateLb(false);
   loadLbPhoto(index || 0);
-  $('#lightbox').hidden = false;
-  document.body.style.overflow = 'hidden';
+  openModal('lightbox'); // スタックに積む（下のモーダルは隠れ、閉じたら出し直す）
 }
 
+// 拡大表示を閉じる（UIトリガ）。ゴーストクリック対策を仕込んでから履歴を1つ戻す。
 function closeLightbox() {
-  const box = $('#lightbox');
-  if (box.hidden) return;
-  lb.closedAt = Date.now(); // 直後の背景タップ貫通で下のモーダルを閉じさせない
-  box.hidden = true;
-  // ゴーストクリック対策：閉じたタップの直後（touch/mouseの約300ms後）に発火する合成clickが、
-  // 下のモーダルの✕([data-close])等に当たって誤爆するのを、キャプチャ段階で1回だけ握りつぶす。
-  // （.modal背景だけでなく[data-close]ボタンも守る＝保存前の入力を吹き飛ばさない）
-  const swallowGhost = (ev) => {
-    ev.stopPropagation(); ev.preventDefault();
-    document.removeEventListener('click', swallowGhost, true);
-  };
-  document.addEventListener('click', swallowGhost, true);
-  setTimeout(() => document.removeEventListener('click', swallowGhost, true), 500);
-  $('#lightboxImg').src = '';
-  if (lb.url) { URL.revokeObjectURL(lb.url); lb.url = null; }
-  lb.photos = [];
-  if ($('#detailModal').hidden && $('#editModal').hidden && $('#menuModal').hidden) {
-    document.body.style.overflow = '';
-  }
+  if ($('#lightbox').hidden) return;
+  installGhostSwallow();
+  closeModal();
 }
 
 // dir: +1 次へ / -1 前へ。端はループ（最後→最初 / 最初→最後）
@@ -1104,7 +1096,7 @@ function openConquest() {
     rc.appendChild(row);
   }
 
-  showModal('#conquestModal');
+  openModal('conquestModal');
 }
 
 /* 全国制覇モードの表示ON/OFF（端末ごとの設定・localStorage） */
@@ -1142,7 +1134,7 @@ function openCalendar() {
   }
   state.cal.sel = null;
   renderCalendar();
-  showModal('#calendarModal');
+  openModal('calendarModal', { onReveal: renderCalendar });
 }
 
 function shiftCalMonth(delta) {
@@ -1244,7 +1236,7 @@ function renderCalDay(byDate) {
     wrap.appendChild(nm);
     if (r.prefecture) { const pf = document.createElement('span'); pf.className = 'cal-day-pref'; pf.textContent = r.prefecture; wrap.appendChild(pf); }
     row.appendChild(em); row.appendChild(wrap);
-    row.addEventListener('click', () => { hideModal('#calendarModal'); openDetail(gid, 'calendar'); });
+    row.addEventListener('click', () => openDetail(gid));
     panel.appendChild(row);
   }
 }
@@ -1341,8 +1333,9 @@ function filterToPref(p) {
   state.filterPref = p;
   $('#prefFilter').value = p;
   resetStatusTabTo('all');
+  state.filterBeforeConquest = null; // 新フィルタ適用＝制覇前に戻す予約は解除
   render();
-  hideModal('#conquestModal');
+  closeModal();
   toast(p + ' でしぼり込み');
 }
 
@@ -1351,8 +1344,9 @@ function filterToRegion(region) {
   state.filterPref = '';
   $('#prefFilter').value = '';
   resetStatusTabTo('all');
+  state.filterBeforeConquest = null; // 新フィルタ適用＝制覇前に戻す予約は解除
   render();
-  hideModal('#conquestModal');
+  closeModal();
   toast(region + ' でしぼり込み');
 }
 
@@ -1427,8 +1421,8 @@ async function importData(file) {
   for (const p of (data.photos || [])) {
     await dbPut('photos', { id: p.id, restaurantId: p.restaurantId, createdAt: p.createdAt, updatedAt: p.createdAt || Date.now(), deleted: false, uploaded: false, blob: dataURLtoBlob(p.dataURL) });
   }
-  hideModal('#menuModal');
   await loadAll();
+  closeModal();
   if (window.RestoSync) RestoSync.scheduleSync();
   toast(`復元しました（店 ${data.restaurants.length} 件）`);
 }
@@ -1454,15 +1448,55 @@ function hideModal(sel) {
   document.body.style.overflow = '';
   if (sel === '#editModal' || sel === '#detailModal') revokeViewURLs();
 }
-// モーダルを閉じる共通処理。詳細をカレンダー経由で開いていたら、閉じたらカレンダーに戻す。
-function dismissModal(id) {
-  if (id === 'conquestModal') restoreFromConquest(); // 制覇を閉じたら元のフィルタに戻す
-  hideModal('#' + id);
-  if (id === 'detailModal' && state.detailFrom === 'calendar') {
-    state.detailFrom = null;
-    showModal('#calendarModal');
-    renderCalendar();
+
+/* ---------- モーダル・スタック（履歴連動：OSの戻る＝アプリ内の戻る＝同じ1本） ---------- */
+const modalStack = [];
+const stackTop = () => modalStack[modalStack.length - 1];
+
+// モーダルを開く：今のトップは隠し、新しいのを見せ、履歴を1つ積む（＝OS戻るで閉じられる）
+function openModal(id, opts) {
+  const top = stackTop();
+  if (top && top.id !== id) $('#' + top.id).hidden = true;
+  modalStack.push({ id, onReveal: (opts && opts.onReveal) || null });
+  $('#' + id).hidden = false;
+  document.body.style.overflow = 'hidden';
+  history.pushState({ md: modalStack.length }, '');
+}
+
+// UIからの「閉じる」は全部これ（履歴を1つ戻す→popstateがcloseTopModalを呼ぶ＝経路を1本に）
+function closeModal() { if (modalStack.length) history.back(); }
+
+// 一番上を実際に閉じ、下（＝呼び出し元）を出し直す。popstate から呼ばれる（history は触らない）
+function closeTopModal() {
+  const closing = modalStack.pop();
+  if (!closing) return;
+  $('#' + closing.id).hidden = true;
+  if (closing.id === 'editModal' || closing.id === 'detailModal') revokeViewURLs();
+  if (closing.id === 'conquestModal') restoreFromConquest(); // 制覇を閉じたら元フィルタに戻す（filterToPref経由なら予約解除済でno-op）
+  if (closing.id === 'lightbox') lightboxCleanup();
+  const below = stackTop();
+  if (below) {
+    $('#' + below.id).hidden = false;
+    document.body.style.overflow = 'hidden';
+    if (below.onReveal) below.onReveal();
+  } else {
+    document.body.style.overflow = '';
   }
+}
+
+// 拡大表示を閉じたタップ直後の“ゴーストクリック”（約300ms後の合成click）を1回だけ握りつぶす
+function installGhostSwallow() {
+  lb.closedAt = Date.now();
+  const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); document.removeEventListener('click', swallow, true); };
+  document.addEventListener('click', swallow, true);
+  setTimeout(() => document.removeEventListener('click', swallow, true), 500);
+}
+
+// 拡大表示のDOM後始末（closeTopModal から呼ぶ）
+function lightboxCleanup() {
+  $('#lightboxImg').src = '';
+  if (lb.url) { URL.revokeObjectURL(lb.url); lb.url = null; }
+  lb.photos = [];
 }
 
 /* ---------- 初期化 ---------- */
@@ -1539,20 +1573,22 @@ function bindEvents() {
   } else {
     window.addEventListener('scroll', () => maybeLoadMore(), { passive: true });
   }
-  $('#menuBtn').addEventListener('click', () => { updateMenuStat(); applyConquestVisibility(); applyThemeToggleState(); if (window.RestoSync) RestoSync.renderPanel(); showModal('#menuModal'); });
+  $('#menuBtn').addEventListener('click', () => { updateMenuStat(); applyConquestVisibility(); applyThemeToggleState(); if (window.RestoSync) RestoSync.renderPanel(); openModal('menuModal'); });
   $('#exportBtn').addEventListener('click', exportData);
   $('#importInput').addEventListener('change', (e) => { if (e.target.files[0]) importData(e.target.files[0]); e.target.value = ''; });
 
   document.querySelectorAll('[data-close]').forEach((b) =>
-    b.addEventListener('click', (e) => dismissModal(e.target.closest('.modal').id))
+    b.addEventListener('click', () => closeModal())
   );
   document.querySelectorAll('.modal').forEach((m) =>
     m.addEventListener('click', (e) => {
       // 拡大表示を閉じた直後のタップ貫通では閉じない（保存前の入力を守る）
       if (Date.now() - lb.closedAt < 500) return;
-      if (e.target === m) dismissModal(m.id);
+      if (e.target === m) closeModal();
     })
   );
+  // OSの戻る/横スワイプ＝アプリ内の戻る。履歴が1つ戻ったら一番上のモーダルを閉じる。
+  window.addEventListener('popstate', () => { if (modalStack.length) closeTopModal(); });
 }
 
 async function init() {
