@@ -90,7 +90,7 @@
       <form id="editForm" class="form">
         <input type="hidden" id="f_id" />
         <label class="field">
-          <span class="label">店名 <em>*</em></span>
+          <span class="label" id="f_nameLabel">店名 <em>*</em></span>
           <input type="text" id="f_name" required placeholder="例）餃子の王将 三宮店" />
         </label>
         <label class="field">
@@ -266,6 +266,7 @@
   <!-- ===== トースト ===== -->
   <div class="toast" id="toast" hidden></div>
 
+  <script src="preset.js"></script>
   <script src="vendor/supabase.min.js"></script>
   <script src="config.js"></script>
   <script src="sync.js"></script>

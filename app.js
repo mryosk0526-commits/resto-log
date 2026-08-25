@@ -20,12 +20,8 @@ const PREFECTURES = [
 const MAX_PHOTOS = 10;
 const MAX_EDGE = 1200;      // 写真の長辺(px) — これ以上は縮小
 const JPEG_QUALITY = 0.8;
-const MAX_STORES = 300;     // 登録上限（重複＝別訪問も1件として数える）
-const GENRES = [
-  'ラーメン', '寿司', '焼肉・肉', '居酒屋', 'カフェ・喫茶', '定食・食堂',
-  'そば・うどん', 'イタリアン', 'フレンチ', '中華', 'カレー',
-  'ファストフード', 'スイーツ', 'バー', 'その他',
-];
+const MAX_STORES = window.APP_PRESET.maxStores;  // 登録上限（重複＝別訪問も1件として数える）
+const GENRES = window.APP_PRESET.genres;          // ジャンルの選択肢＝プリセットから
 
 // 全国制覇: 都道府県タイルの配置（[列,行]・日本の形を模した並び／北陸も穴なし）と地方区分
 // [x, y, w, h]（w,h省略時1）— 都道府県ごとに大きさ可変のモザイク配置
@@ -389,7 +385,7 @@ function makeStars(n) {
 function statusBadge(status) {
   const b = document.createElement('span');
   b.className = 'badge ' + status;
-  b.textContent = status === 'visited' ? '行った' : '行きたい';
+  b.textContent = status === 'visited' ? APP_PRESET.labels.visited : APP_PRESET.labels.want;
   return b;
 }
 
@@ -499,10 +495,10 @@ function buildCard(g) {
 async function openEdit(r, prefill) {
   // 新規登録（＝訪問の追加も含む）は300件上限でブロック
   if (!r && state.restaurants.length >= MAX_STORES) {
-    toast(`登録は${MAX_STORES}件までです。古い店を整理してね`);
+    toast(`登録は${MAX_STORES}件までです。古い${APP_PRESET.itemNoun}を整理してね`);
     return;
   }
-  $('#editTitle').textContent = r ? '店を編集' : (prefill ? 'もう1回来た（訪問を追加）' : '店を追加');
+  $('#editTitle').textContent = r ? `${APP_PRESET.itemNoun}を編集` : (prefill ? 'もう1回来た（訪問を追加）' : `${APP_PRESET.itemNoun}を追加`);
   $('#f_id').value = r ? r.id : '';
   $('#f_name').value = r ? r.name : (prefill ? prefill.name : '');
   $('#f_pref').value = r ? (r.prefecture || '') : (prefill ? (prefill.prefecture || '') : '');
@@ -647,7 +643,7 @@ async function saveFromForm(e) {
   const id = $('#f_id').value || uid();
   const existing = state.restaurants.find((r) => r.id === id);
   if (!existing && state.restaurants.length >= MAX_STORES) {
-    toast(`登録は${MAX_STORES}件までです。古い店を整理してね`); return;
+    toast(`登録は${MAX_STORES}件までです。古い${APP_PRESET.itemNoun}を整理してね`); return;
   }
   const prefecture = $('#f_pref').value;
   const status = document.querySelector('input[name=f_status]:checked').value;
@@ -761,7 +757,7 @@ async function renderDetail(gid) {
   const anyVisited = members.some((m) => m.status === 'visited');
   const badge = $('#d_status');
   badge.className = 'badge ' + (anyVisited ? 'visited' : 'want');
-  badge.textContent = anyVisited ? '行った' : '行きたい';
+  badge.textContent = anyVisited ? APP_PRESET.labels.visited : APP_PRESET.labels.want;
 
   const gEl = $('#d_genre');
   if (rep.genre) { gEl.textContent = rep.genre; gEl.hidden = false; } else gEl.hidden = true;
@@ -1219,7 +1215,7 @@ function renderCalDay(byDate) {
   const ds = state.cal.sel;
   if (!ds) {
     const p = document.createElement('p'); p.className = 'cal-hint';
-    p.textContent = '日付をタップすると、その日に行ったお店が出ます';
+    p.textContent = `日付をタップすると、その日に${APP_PRESET.labels.visited}${APP_PRESET.itemNoun}が出ます`;
     panel.appendChild(p);
     return;
   }
@@ -1438,7 +1434,7 @@ async function updateMenuStat() {
       usage = ` ・ 使用中 約${mb < 10 ? mb.toFixed(1) : Math.round(mb)}MB`;
     }
   } catch (_) { /* 取れない環境は表示しない */ }
-  $('#menuStat').textContent = `店 ${r.length}/${MAX_STORES} 件 ・ 写真 ${p.length} 枚${usage}（すべてこの端末内）`;
+  $('#menuStat').textContent = `${APP_PRESET.itemNoun} ${r.length}/${MAX_STORES} 件 ・ 写真 ${p.length} 枚${usage}（すべてこの端末内）`;
 }
 
 /* ---------- モーダル制御 ---------- */
@@ -1591,7 +1587,44 @@ function bindEvents() {
   window.addEventListener('popstate', () => { if (modalStack.length) closeTopModal(); });
 }
 
+/* ---------- プリセット適用（アプリの“顔”を差し替え） ---------- */
+function applyPreset() {
+  const P = window.APP_PRESET;
+  const noun = P.itemNoun;
+  const set = (sel, txt) => { const el = document.querySelector(sel); if (el) el.textContent = txt; };
+  document.title = P.name;
+  set('.app-title', P.headerEmoji + ' ' + P.name);
+  const nl = document.getElementById('f_nameLabel'); if (nl) nl.innerHTML = `${noun}名 <em>*</em>`;
+  // 状態ラベル（フィルタタブ＋フォームのセグメント）
+  document.querySelectorAll('[data-status="want"]').forEach((el) => { el.textContent = P.labels.want; });
+  document.querySelectorAll('[data-status="visited"]').forEach((el) => { el.textContent = P.labels.visited; });
+  document.querySelectorAll('input[name="f_status"][value="want"] + span').forEach((el) => { el.textContent = P.labels.want; });
+  document.querySelectorAll('input[name="f_status"][value="visited"] + span').forEach((el) => { el.textContent = P.labels.visited; });
+  const fn = document.getElementById('f_name'); if (fn) fn.placeholder = P.namePlaceholder;
+  // 空状態・追加ボタン
+  set('.empty-emoji', P.emptyEmoji);
+  set('.empty-text', `まだ${noun}がありません`);
+  set('.empty-sub', `右下の ＋ から、${P.labels.want}${noun}を追加してみよう`);
+  const fab = document.getElementById('fab'); if (fab) fab.setAttribute('aria-label', `${noun}を追加`);
+  // ブランド色（ライト/ダーク）を注入して上書き
+  const b = P.brand;
+  const st = document.createElement('style'); st.id = 'presetBrand';
+  st.textContent =
+    `:root{--brand:${b.light};--brand-soft:${b.lightSoft};}` +
+    `@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--brand:${b.dark};--brand-soft:${b.darkSoft};}}` +
+    `:root[data-theme="dark"]{--brand:${b.dark};--brand-soft:${b.darkSoft};}` +
+    `:root[data-theme="light"]{--brand:${b.light};--brand-soft:${b.lightSoft};}`;
+  document.head.appendChild(st);
+  const tc = document.querySelector('meta[name="theme-color"]'); if (tc) tc.setAttribute('content', b.light);
+  // 地理コンプ（全国制覇マップ）の有無。集めるものが土地に紐づかないなら false で丸ごと隠す
+  if (!P.geoEnabled) {
+    const cb = document.getElementById('conquestBtn'); if (cb) cb.hidden = true;
+    const pf = document.getElementById('prefFilter'); if (pf) pf.hidden = true;
+  }
+}
+
 async function init() {
+  applyPreset();
   applyTheme();
   initPrefOptions();
   initGenreOptions();
