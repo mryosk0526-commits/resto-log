@@ -15,6 +15,7 @@ create table if not exists public.restaurants (
 );
 alter table public.restaurants add column if not exists is_public boolean not null default false;
 alter table public.restaurants add column if not exists rating int not null default 0;
+alter table public.restaurants add column if not exists city text;
 alter table public.restaurants enable row level security;
 
 drop policy if exists "own_select" on public.restaurants;

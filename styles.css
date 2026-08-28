@@ -189,6 +189,23 @@ body {
 .mode-gallery .card-body { padding: 8px 10px; }
 .mode-gallery .card-sub, .mode-gallery .card-memo, .mode-gallery .card-stars { display: none; }
 
+/* ===== セクション表示（ジャンルで束ねる・折りたたみ） ===== */
+.list.sectioned { display: block !important; }
+.section { margin: 0 0 4px; }
+.sec-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; margin: 8px 0;
+  background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 10px; cursor: pointer; user-select: none;
+}
+.sec-header .chev { color: var(--muted); font-size: 12px; transition: transform .15s; }
+.sec-header.collapsed .chev { transform: rotate(-90deg); }
+.sec-header .sec-name { font-weight: 700; font-size: 15px; }
+.sec-header .sec-count { margin-left: auto; font-size: 12px; color: var(--text-2); background: var(--bg); border-radius: 999px; padding: 1px 10px; }
+.sec-group { display: flex; flex-direction: column; gap: 8px; }
+.sec-group.mode-card { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.sec-group.mode-gallery { display: block; column-width: 180px; column-gap: 10px; }
+
 /* 表示切替セグメント */
 .viewbar { display: flex; justify-content: flex-end; }
 .viewmodes { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }

@@ -11,7 +11,7 @@
   const LS_PULL = 'resto-sync-lastPull';   // restaurants: 最後に取り込んだ updated_at
   const LS_PUSH = 'resto-sync-lastPush';   // restaurants: 最後に送った updated_at
   const LS_PPULL = 'resto-sync-photoPull'; // photos: 最後に取り込んだ updated_at
-  const LS_PPUSH = 'resto-sync-photoPush'; // photos: 最後に送った updated_at
+  // 写真メタのpushは端末時計のウォーターマークでなく photo.metaSynced フラグで管理（時計ズレ→孤児blob対策）
   const BUCKET = 'photos';
   const PUSH_DEBOUNCE = 2500;
 
@@ -42,7 +42,7 @@
   /* ---------- レコード変換（local <-> Supabase行） ---------- */
   function rowToLocal(row) {
     return {
-      id: row.id, name: row.name, prefecture: row.prefecture, groupId: row.group_id,
+      id: row.id, name: row.name, prefecture: row.prefecture, city: row.city || '', groupId: row.group_id,
       genre: row.genre, url: row.url, memo: row.memo, status: row.status, date: row.date,
       rating: row.rating || 0,
       createdAt: row.created_at, updatedAt: row.updated_at, deleted: !!row.deleted, isPublic: !!row.is_public,
@@ -50,7 +50,7 @@
   }
   function localToRow(r, userId) {
     return {
-      id: r.id, user_id: userId, name: r.name, prefecture: r.prefecture, group_id: r.groupId || r.id,
+      id: r.id, user_id: userId, name: r.name, prefecture: r.prefecture, city: r.city || '', group_id: r.groupId || r.id,
       genre: r.genre || '', url: r.url || '', memo: r.memo || '', status: r.status || 'want',
       rating: r.rating || 0,
       date: r.date || '', created_at: r.createdAt || Date.now(),
@@ -105,13 +105,12 @@
   async function pushPhotos() {
     const c = getClient(); if (!c || !session) return 0;
     const uid = session.user.id;
-    const last = getNum(LS_PPUSH);
     const all = await window.RestoDB.getAll('photos');
     // 1) 未アップロードのblobをStorageへ（メタより先に上げる＝順序で穴を作らない）
     for (const p of all) {
       if (!p.deleted && !p.uploaded && p.blob) {
         const { error } = await c.storage.from(BUCKET).upload(photoPath(uid, p.id), p.blob, { upsert: true, contentType: 'image/jpeg' });
-        if (!error) { p.uploaded = true; await window.RestoDB.put('photos', p); }
+        if (!error) { p.uploaded = true; p.metaSynced = false; await window.RestoDB.put('photos', p); }
         else { console.warn('[sync] photo upload', error); }
       }
     }
@@ -119,11 +118,13 @@
     for (const p of all) {
       if (p.deleted && p.uploaded) {
         try { await c.storage.from(BUCKET).remove([photoPath(uid, p.id)]); } catch (_) {}
-        p.uploaded = false; await window.RestoDB.put('photos', p);
+        p.uploaded = false; p.metaSynced = false; await window.RestoDB.put('photos', p);
       }
     }
-    // 3) メタ更新（updatedAt>last かつ アップ済 or 削除済）
-    const changed = all.filter((p) => (p.updatedAt || p.createdAt || 0) > last && (p.uploaded || p.deleted));
+    // 3) メタ登録＝端末の時計に頼らず「blob上げ済 or 削除済 で まだメタ未同期」を必ず送る。
+    //    旧実装は updatedAt>ウォーターマーク で判定→時計ズレでメタだけ登録漏れ（孤児blob）が起きた。
+    //    このフラグ方式なら、過去に孤児化した写真も次回同期でメタが自動的に埋まる。
+    const changed = all.filter((p) => (p.uploaded || p.deleted) && !p.metaSynced);
     if (!changed.length) return 0;
     const rows = changed.map((p) => ({
       id: p.id, user_id: uid, restaurant_id: p.restaurantId,
@@ -132,7 +133,7 @@
     }));
     const { error } = await c.from('photos').upsert(rows, { onConflict: 'id' });
     if (error) throw error;
-    setNum(LS_PPUSH, changed.reduce((m, p) => Math.max(m, p.updatedAt || p.createdAt || 0), last));
+    for (const p of changed) { p.metaSynced = true; await window.RestoDB.put('photos', p); }
     return changed.length;
   }
 
@@ -141,25 +142,33 @@
     const last = getNum(LS_PPULL);
     const { data, error } = await c.from('photos').select('*').gt('updated_at', last).order('updated_at', { ascending: true });
     if (error) throw error;
-    let maxSeen = last, applied = 0;
+    // ウォーターマークは「連続して取り込めた所まで」しか進めない。
+    // DLに失敗した行を追い越すと、その写真を二度と拾えなくなる（旧バグ）ため、
+    // 失敗が出たらそれ以降は commit を止めて次回同期でリトライさせる。
+    let commit = last, blocked = false, applied = 0;
     for (const row of data) {
-      maxSeen = Math.max(maxSeen, row.updated_at || 0);
+      const ts = row.updated_at || 0;
+      let ok = false;
       const local = await window.RestoDB.get('photos', row.id);
       if (row.deleted) {
         if (!local || !local.deleted) {
-          await window.RestoDB.put('photos', { id: row.id, restaurantId: row.restaurant_id, createdAt: row.created_at, updatedAt: row.updated_at, deleted: true, uploaded: true });
+          await window.RestoDB.put('photos', { id: row.id, restaurantId: row.restaurant_id, createdAt: row.created_at, updatedAt: row.updated_at, deleted: true, uploaded: true, metaSynced: true });
           applied++;
         }
-      } else if (!local || (!local.blob && !local.deleted)) {
-        // Storageからblobを落とす
+        ok = true;
+      } else if (local && (local.blob || local.deleted)) {
+        ok = true; // 既に手元にある＝取り込み不要
+      } else {
         const { data: blob, error: dlErr } = await c.storage.from(BUCKET).download(photoPath(row.user_id, row.id));
         if (!dlErr && blob) {
-          await window.RestoDB.put('photos', { id: row.id, restaurantId: row.restaurant_id, blob, createdAt: row.created_at, updatedAt: row.updated_at, deleted: false, uploaded: true, isPublic: !!row.is_public });
-          applied++;
-        } else if (dlErr) { console.warn('[sync] photo download', dlErr); }
+          await window.RestoDB.put('photos', { id: row.id, restaurantId: row.restaurant_id, blob, createdAt: row.created_at, updatedAt: row.updated_at, deleted: false, uploaded: true, isPublic: !!row.is_public, metaSynced: true });
+          applied++; ok = true;
+        } else { if (dlErr) console.warn('[sync] photo download', dlErr); }
       }
+      if (ok && !blocked) commit = Math.max(commit, ts);
+      else if (!ok) blocked = true;
     }
-    if (data.length) { setNum(LS_PPULL, maxSeen); setNum(LS_PPUSH, Math.max(getNum(LS_PPUSH), maxSeen)); }
+    setNum(LS_PPULL, commit);
     return applied;
   }
 

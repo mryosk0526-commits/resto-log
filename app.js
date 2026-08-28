@@ -104,7 +104,7 @@ window.reloadFromDB = async () => { await loadAll(); };
 async function removePhoto(id) {
   const p = await dbGet('photos', id);
   if (!p) return;
-  if (p.uploaded) { p.deleted = true; p.updatedAt = Date.now(); p.blob = undefined; await dbPut('photos', p); }
+  if (p.uploaded) { p.deleted = true; p.updatedAt = Date.now(); p.blob = undefined; p.metaSynced = false; await dbPut('photos', p); }
   else { await dbDelete('photos', id); }
 }
 
@@ -282,6 +282,8 @@ const state = {
   filterBeforeConquest: null, // 制覇画面に入る前のフィルタ（閉じたら戻す）
   cal: { y: null, m: null, sel: null, mode: 'month' }, // カレンダー: 年/月(0-11)・選択日・表示(month/year)
   viewMode: 'card',  // 表示モード: list / card / gallery
+  sectionOn: false,  // ジャンルでまとめる（セクション表示）ON/OFF
+  secExpanded: null, // 開いているジャンルのSet（既定は全部畳む）
   view: { groups: [], rendered: 0 }, // 一覧の段階描画（無限スクロール）
   // 編集フォームの写真ステージング
   form: { photos: [], removed: [], dateManual: false, rating: 0 }, // photos: {key, blob, dbId|null}
@@ -348,10 +350,10 @@ function buildGroups() {
     let thumb = null;
     for (const m of members) { if (state.firstPhoto[m.id]) { thumb = state.firstPhoto[m.id]; break; } }
     const rating = members.reduce((mx, m) => Math.max(mx, m.rating || 0), 0);
-    const searchText = (latest.name + ' ' + members.map((m) => m.memo || '').join(' ') + ' ' + (rep.genre || '') + ' ' + (latest.prefecture || '')).toLowerCase();
+    const searchText = (latest.name + ' ' + members.map((m) => m.memo || '').join(' ') + ' ' + (rep.genre || '') + ' ' + (latest.prefecture || '') + ' ' + (latest.city || '')).toLowerCase();
     groups.push({
       gid, members,
-      name: latest.name, prefecture: latest.prefecture || '', genre: rep.genre || '',
+      name: latest.name, prefecture: latest.prefecture || '', city: latest.city || '', genre: rep.genre || '',
       count: members.length, number, rating, searchText,
       latestDate: displayDate(latest), latestSort: visitTime(latest),
       status: members.some((m) => m.status === 'visited') ? 'visited' : 'want',
@@ -412,14 +414,72 @@ function render() {
 
   $('#emptyState').hidden = groups.length !== 0;
 
-  // 段階描画：まず先頭バッチだけ描き、残りはスクロールで追加（画像も遅延）
-  state.view.groups = groups;
-  state.view.rendered = 0;
-  renderNextBatch();
-  maybeLoadMore();
+  list.classList.toggle('sectioned', !!state.sectionOn);
+  if (state.sectionOn) {
+    // ジャンルごとに束ねて見出し＋折りたたみ表示（無限スクロールは使わない）
+    state.view.groups = []; state.view.rendered = 0;
+    renderSections(groups);
+  } else {
+    // 段階描画：まず先頭バッチだけ描き、残りはスクロールで追加（画像も遅延）
+    state.view.groups = groups;
+    state.view.rendered = 0;
+    renderNextBatch();
+    maybeLoadMore();
+  }
 
   // 旧URLは少し遅らせて解放（差し替え中の読み込み中断＝404ノイズを防ぐ）
   setTimeout(() => oldUrls.forEach((u) => URL.revokeObjectURL(u)), 1500);
+}
+
+/* ---------- セクション表示（ジャンルで束ねる・折りたたみ） ---------- */
+function renderSections(groups) {
+  const list = $('#list');
+  const buckets = new Map();
+  for (const g of GENRES) buckets.set(g, []);
+  for (const grp of groups) {
+    const key = (grp.genre && buckets.has(grp.genre)) ? grp.genre : '__other';
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(grp);
+  }
+  const mode = state.viewMode;
+  const frag = document.createDocumentFragment();
+  for (const key of [...GENRES, '__other']) {
+    const items = buckets.get(key);
+    if (!items || !items.length) continue;
+    const label = key === '__other' ? 'その他' : key;
+    const expanded = state.secExpanded && state.secExpanded.has(key);
+
+    const section = document.createElement('div'); section.className = 'section';
+    const head = document.createElement('div');
+    head.className = 'sec-header' + (expanded ? '' : ' collapsed');
+    const chev = document.createElement('span'); chev.className = 'chev'; chev.textContent = '▾';
+    const nm = document.createElement('span'); nm.className = 'sec-name'; nm.textContent = label;
+    const cnt = document.createElement('span'); cnt.className = 'sec-count'; cnt.textContent = items.length;
+    head.appendChild(chev); head.appendChild(nm); head.appendChild(cnt);
+
+    const groupEl = document.createElement('div');
+    groupEl.className = 'sec-group mode-' + mode;
+    if (expanded) { for (const it of items) groupEl.appendChild(buildCard(it)); }
+    else groupEl.hidden = true;
+
+    head.addEventListener('click', () => {
+      const willExpand = head.classList.contains('collapsed');
+      head.classList.toggle('collapsed');
+      if (willExpand) {
+        state.secExpanded.add(key);
+        if (!groupEl.childElementCount) for (const it of items) groupEl.appendChild(buildCard(it));
+        groupEl.hidden = false;
+      } else {
+        state.secExpanded.delete(key);
+        groupEl.hidden = true;
+      }
+      persistSecExpanded();
+    });
+
+    section.appendChild(head); section.appendChild(groupEl);
+    frag.appendChild(section);
+  }
+  list.appendChild(frag);
 }
 
 function renderNextBatch() {
@@ -434,6 +494,7 @@ function renderNextBatch() {
 
 // 番兵がまだ画面近くにある間、残りをバッチで描き足す（初期表示・スクロール・モード切替で使用）
 function maybeLoadMore() {
+  if (state.sectionOn) return; // セクション表示中は段階描画を使わない
   const s = $('#listSentinel');
   if (!s) return;
   let guard = 0;
@@ -475,7 +536,8 @@ function buildCard(g) {
   sub.className = 'card-sub';
   sub.appendChild(statusBadge(g.status));
   if (g.genre) sub.appendChild(chip(g.genre));
-  if (g.prefecture) sub.appendChild(chip(g.prefecture));
+  const loc = [g.prefecture, g.city].filter(Boolean).join(' ');
+  if (loc) sub.appendChild(chip(loc));
   if (g.latestDate) sub.appendChild(chip('📅 ' + g.latestDate));
   if (g.totalPhotos) sub.appendChild(chip('📷 ' + g.totalPhotos));
 
@@ -502,6 +564,7 @@ async function openEdit(r, prefill) {
   $('#f_id').value = r ? r.id : '';
   $('#f_name').value = r ? r.name : (prefill ? prefill.name : '');
   $('#f_pref').value = r ? (r.prefecture || '') : (prefill ? (prefill.prefecture || '') : '');
+  $('#f_city').value = r ? (r.city || '') : (prefill ? (prefill.city || '') : '');
   $('#f_genre').value = r ? (r.genre || '') : (prefill ? (prefill.genre || '') : '');
   $('#f_url').value = r ? (r.url || '') : '';
   $('#f_memo').value = r ? (r.memo || '') : '';
@@ -667,6 +730,7 @@ async function saveFromForm(e) {
 
   const rec = {
     id, name, prefecture, groupId,
+    city: $('#f_city').value.trim(),
     genre: $('#f_genre').value,
     url: $('#f_url').value.trim(),
     memo: $('#f_memo').value.trim(),
@@ -761,7 +825,7 @@ async function renderDetail(gid) {
 
   const gEl = $('#d_genre');
   if (rep.genre) { gEl.textContent = rep.genre; gEl.hidden = false; } else gEl.hidden = true;
-  $('#d_pref').textContent = members[0].prefecture || '未設定';
+  $('#d_pref').textContent = [members[0].prefecture, members[0].city].filter(Boolean).join(' ') || '未設定';
   const cEl = $('#d_count');
   if (members.length > 1) { cEl.textContent = members.length + '回訪問'; cEl.hidden = false; } else cEl.hidden = true;
 
@@ -863,7 +927,7 @@ function addVisitToCurrentGroup() {
   const members = groupMembers(state.currentGroupId);
   if (!members.length) return;
   const base = members[0];
-  openEdit(null, { name: base.name, prefecture: base.prefecture || '', genre: base.genre || '' });
+  openEdit(null, { name: base.name, prefecture: base.prefecture || '', city: base.city || '', genre: base.genre || '' });
 }
 
 /* ---------- 写真の拡大表示（スワイプ移動/ピンチ/パン/ダブルタップ） ---------- */
@@ -1310,13 +1374,33 @@ function setViewMode(m) {
   state.viewMode = m;
   try { localStorage.setItem(VIEW_KEY, m); } catch (_) {}
   applyViewMode();
-  maybeLoadMore(); // モードで密度が変わるので、足りなければ描き足す
+  if (state.sectionOn) render(); // セクションは各グループのモードclassを貼り直すため再描画
+  else maybeLoadMore();          // モードで密度が変わるので、足りなければ描き足す
 }
 function initViewMode() {
   let saved = 'card';
   try { saved = localStorage.getItem(VIEW_KEY) || 'card'; } catch (_) {}
   state.viewMode = VIEW_MODES.includes(saved) ? saved : 'card';
   applyViewMode();
+}
+
+/* ---------- セクション表示のON/OFF（端末ごとの設定・localStorage） ---------- */
+const SECTION_KEY = 'resto-log-section';
+const SEC_EXP_KEY = 'resto-log-sec-exp';
+function sectionEnabled() { try { return localStorage.getItem(SECTION_KEY) === '1'; } catch (_) { return false; } }
+function loadSecExpanded() { try { const a = JSON.parse(localStorage.getItem(SEC_EXP_KEY) || '[]'); return new Set(Array.isArray(a) ? a : []); } catch (_) { return new Set(); } }
+function persistSecExpanded() { try { localStorage.setItem(SEC_EXP_KEY, JSON.stringify([...state.secExpanded])); } catch (_) {} }
+function applySectionToggleState() { const t = $('#sectionToggle'); if (t) t.checked = state.sectionOn; }
+function initSection() {
+  state.sectionOn = sectionEnabled();
+  state.secExpanded = loadSecExpanded();
+  applySectionToggleState();
+}
+function setSectionEnabled(on) {
+  state.sectionOn = on;
+  try { localStorage.setItem(SECTION_KEY, on ? '1' : '0'); } catch (_) {}
+  applySectionToggleState();
+  render();
 }
 
 function resetStatusTabTo(status) {
@@ -1559,6 +1643,7 @@ function bindEvents() {
   $('#cal_next').addEventListener('click', () => shiftCalMonth(1));
   $('#cal_seg').addEventListener('click', (e) => { const b = e.target.closest('button[data-cmode]'); if (b) setCalMode(b.dataset.cmode); });
   $('#darkToggle').addEventListener('change', (e) => setDark(e.target.checked));
+  $('#sectionToggle').addEventListener('change', (e) => setSectionEnabled(e.target.checked));
   $('#viewModes').addEventListener('click', (e) => { const b = e.target.closest('.vm'); if (b) setViewMode(b.dataset.mode); });
 
   // 無限スクロール：番兵が画面に近づいたら次のバッチを描く
@@ -1569,7 +1654,7 @@ function bindEvents() {
   } else {
     window.addEventListener('scroll', () => maybeLoadMore(), { passive: true });
   }
-  $('#menuBtn').addEventListener('click', () => { updateMenuStat(); applyConquestVisibility(); applyThemeToggleState(); if (window.RestoSync) RestoSync.renderPanel(); openModal('menuModal'); });
+  $('#menuBtn').addEventListener('click', () => { updateMenuStat(); applyConquestVisibility(); applyThemeToggleState(); applySectionToggleState(); if (window.RestoSync) RestoSync.renderPanel(); openModal('menuModal'); });
   $('#exportBtn').addEventListener('click', exportData);
   $('#importInput').addEventListener('change', (e) => { if (e.target.files[0]) importData(e.target.files[0]); e.target.value = ''; });
 
@@ -1632,6 +1717,7 @@ async function init() {
   applyConquestVisibility();
   applyThemeToggleState();
   initViewMode();
+  initSection();
   try {
     await loadAll();
   } catch (err) {
