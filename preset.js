@@ -33,10 +33,10 @@ window.APP_PRESET = {
   // 容量プラン：写真の総枠は各プラン共通で約3,000枚(≒Supabase無料1GB)に収まる。
   // 丸い数字から1つ選ぶだけ＝どれを選んでも容量は安全。
   storagePlans: [
-    { photos: 10, stores: 300 },   // 標準（写真しっかり）
-    { photos: 5,  stores: 600 },   // バランス
-    { photos: 3,  stores: 1000 },  // たくさん集める・写真少なめ
-    { photos: 20, stores: 150 },   // 写真たっぷり・店少なめ
+    { name: '標準',         photos: 10, stores: 300 },   // 写真しっかり
+    { name: 'バランス',     photos: 5,  stores: 600 },
+    { name: 'たくさん集める', photos: 3,  stores: 1000 },  // 写真少なめ
+    { name: '写真たっぷり',  photos: 20, stores: 150 },   // 店少なめ
   ],
   plan: 0,   // 上のどれを使うか（0=標準10×300）
 

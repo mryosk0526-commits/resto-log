@@ -17,13 +17,29 @@ const PREFECTURES = [
   '熊本県','大分県','宮崎県','鹿児島県','沖縄県'
 ];
 
-// 容量プラン（preset.storagePlans[plan]）から導出。overrideがあればそちら優先。
-const _PLAN = (window.APP_PRESET.storagePlans && window.APP_PRESET.storagePlans[window.APP_PRESET.plan]) || { photos: 10, stores: 300 };
-const MAX_PHOTOS = window.APP_PRESET.maxPhotosOverride || _PLAN.photos;  // 1店あたり写真上限
+// 容量プラン：preset.storagePlans[選択plan] から導出。アプリ内でも切替可（localStorage）。overrideがあれば優先。
+const PLAN_KEY = 'resto-log-plan';
+let MAX_PHOTOS, MAX_STORES, PHOTO_BUDGET;
+function currentPlanIndex() {
+  const P = window.APP_PRESET;
+  let idx;
+  try { const s = localStorage.getItem(PLAN_KEY); if (s !== null) idx = parseInt(s, 10); } catch (_) {}
+  if (!Number.isInteger(idx)) idx = P.plan || 0;
+  const n = (P.storagePlans || []).length;
+  if (idx < 0 || idx >= n) idx = 0;
+  return idx;
+}
+function applyPlanValues() {
+  const P = window.APP_PRESET;
+  const plans = P.storagePlans || [{ photos: 10, stores: 300 }];
+  const plan = plans[currentPlanIndex()] || plans[0];
+  MAX_PHOTOS = P.maxPhotosOverride || plan.photos;   // 1店あたり写真上限
+  MAX_STORES = P.maxStoresOverride || plan.stores;   // 登録上限（重複＝別訪問も1件）
+  PHOTO_BUDGET = P.photoBudget || 3000;              // 写真の総枠（≒無料1GB）。達したら新規写真だけ停止
+}
+applyPlanValues();
 const MAX_EDGE = 1200;      // 写真の長辺(px) — これ以上は縮小
 const JPEG_QUALITY = 0.8;
-const MAX_STORES = window.APP_PRESET.maxStoresOverride || _PLAN.stores;  // 登録上限（重複＝別訪問も1件として数える）
-const PHOTO_BUDGET = window.APP_PRESET.photoBudget || 3000;              // 写真の総枠（≒無料1GB）。達したら新規写真だけ停止
 const GENRES = window.APP_PRESET.genres;          // ジャンルの選択肢＝プリセットから
 
 // 全国制覇: 都道府県タイルの配置（[列,行]・日本の形を模した並び／北陸も穴なし）と地方区分
@@ -1422,6 +1438,58 @@ function setSectionEnabled(on) {
   render();
 }
 
+/* ---------- 容量プランの切替（アプリ内・localStorage・超過時は確認ダイアログ） ---------- */
+function setPlan(idx) {
+  const P = window.APP_PRESET;
+  const plans = P.storagePlans || [];
+  if (!Number.isInteger(idx) || idx < 0 || idx >= plans.length || idx === currentPlanIndex()) { renderPlanUI(); return; }
+  const np = plans[idx];
+  const newStores = P.maxStoresOverride || np.stores;
+  const newPhotos = P.maxPhotosOverride || np.photos;
+  const noun = P.itemNoun;
+  const activeStores = state.restaurants.length;
+  const counts = Object.values(state.photoCounts);
+  const maxOnAStore = counts.length ? Math.max(...counts) : 0;
+  const overStores = activeStores > newStores;
+  const overPhotos = maxOnAStore > newPhotos;
+
+  if (overStores || overPhotos) {
+    let msg = `「${np.name || ('写真' + np.photos + '枚')}」に変更します。\n`;
+    if (overStores) msg += `・今の登録数（${activeStores}${noun}）が新しい上限（${newStores}）を超えます\n`;
+    if (overPhotos) msg += `・一部の${noun}の写真が新しい上限（${newPhotos}枚）を超えます\n`;
+    msg += `\n既存のデータは消えません。上限を超えている間は、新しい登録・写真の追加だけできません。整理すると、また追加できます。\n\n変更しますか？`;
+    if (!confirm(msg)) { renderPlanUI(); return; } // キャンセル＝選択を元に戻す
+  }
+  try { localStorage.setItem(PLAN_KEY, String(idx)); } catch (_) {}
+  applyPlanValues();
+  renderPlanUI();
+  updateMenuStat();
+  render();
+  toast('容量プランを変更しました');
+}
+
+// メニュー内のプラン選択UIを描画（玄人override中・プラン未定義なら非表示）
+function renderPlanUI() {
+  const host = $('#planPanel'); if (!host) return;
+  const P = window.APP_PRESET;
+  const plans = P.storagePlans || [];
+  if (!plans.length || P.maxPhotosOverride || P.maxStoresOverride) { host.innerHTML = ''; return; }
+  const noun = P.itemNoun;
+  const cur = currentPlanIndex();
+  const opts = plans.map((p, i) =>
+    `<option value="${i}"${i === cur ? ' selected' : ''}>${p.name ? p.name + '：' : ''}写真${p.photos}枚 ×最大${p.stores}${noun}</option>`
+  ).join('');
+  host.innerHTML =
+    `<div class="menu-item" style="flex-direction:column;align-items:stretch;gap:8px;cursor:default;">
+       <div style="display:flex;align-items:center;gap:12px;">
+         <span class="menu-emoji">📦</span>
+         <span><b>容量プラン</b><small>写真の枚数と${noun}数の配分・総枠 約${PHOTO_BUDGET}枚で共通</small></span>
+       </div>
+       <select id="planSelect" class="mini-select" style="width:100%;">${opts}</select>
+     </div>`;
+  host.querySelector('#planSelect').addEventListener('change', (e) => setPlan(parseInt(e.target.value, 10)));
+}
+
 function resetStatusTabTo(status) {
   state.filterStatus = status;
   document.querySelectorAll('#statusTabs .tab').forEach((t) => t.classList.toggle('is-active', t.dataset.status === status));
@@ -1678,7 +1746,7 @@ function bindEvents() {
   } else {
     window.addEventListener('scroll', () => maybeLoadMore(), { passive: true });
   }
-  $('#menuBtn').addEventListener('click', () => { updateMenuStat(); applyConquestVisibility(); applyThemeToggleState(); applySectionToggleState(); if (window.RestoSync) RestoSync.renderPanel(); openModal('menuModal'); });
+  $('#menuBtn').addEventListener('click', () => { updateMenuStat(); applyConquestVisibility(); applyThemeToggleState(); applySectionToggleState(); renderPlanUI(); if (window.RestoSync) RestoSync.renderPanel(); openModal('menuModal'); });
   $('#exportBtn').addEventListener('click', exportData);
   $('#importInput').addEventListener('change', (e) => { if (e.target.files[0]) importData(e.target.files[0]); e.target.value = ''; });
 
