@@ -17,10 +17,13 @@ const PREFECTURES = [
   '熊本県','大分県','宮崎県','鹿児島県','沖縄県'
 ];
 
-const MAX_PHOTOS = 10;
+// 容量プラン（preset.storagePlans[plan]）から導出。overrideがあればそちら優先。
+const _PLAN = (window.APP_PRESET.storagePlans && window.APP_PRESET.storagePlans[window.APP_PRESET.plan]) || { photos: 10, stores: 300 };
+const MAX_PHOTOS = window.APP_PRESET.maxPhotosOverride || _PLAN.photos;  // 1店あたり写真上限
 const MAX_EDGE = 1200;      // 写真の長辺(px) — これ以上は縮小
 const JPEG_QUALITY = 0.8;
-const MAX_STORES = window.APP_PRESET.maxStores;  // 登録上限（重複＝別訪問も1件として数える）
+const MAX_STORES = window.APP_PRESET.maxStoresOverride || _PLAN.stores;  // 登録上限（重複＝別訪問も1件として数える）
+const PHOTO_BUDGET = window.APP_PRESET.photoBudget || 3000;              // 写真の総枠（≒無料1GB）。達したら新規写真だけ停止
 const GENRES = window.APP_PRESET.genres;          // ジャンルの選択肢＝プリセットから
 
 // 全国制覇: 都道府県タイルの配置（[列,行]・日本の形を模した並び／北陸も穴なし）と地方区分
@@ -637,9 +640,25 @@ function removeFormPhoto(idx) {
   renderFormPhotos();
 }
 
+// この店の写真を除いた、他の店の写真合計（総枠チェック用）
+function photosOutsideForm() {
+  const thisId = $('#f_id').value;
+  const total = Object.values(state.photoCounts).reduce((a, b) => a + b, 0);
+  return total - (state.photoCounts[thisId] || 0);
+}
+
 async function addFormPhotos(files) {
-  const room = MAX_PHOTOS - state.form.photos.length;
-  if (room <= 0) { toast(`写真は${MAX_PHOTOS}枚までです`); return; }
+  const perStoreRoom = MAX_PHOTOS - state.form.photos.length;       // 1店あたり上限の残り
+  const budgetRoom = PHOTO_BUDGET - photosOutsideForm() - state.form.photos.length; // 総枠の残り
+  const room = Math.min(perStoreRoom, budgetRoom);
+  if (room <= 0) {
+    if (budgetRoom <= 0 && perStoreRoom > 0) {
+      toast(`写真の総数が上限（${PHOTO_BUDGET}枚）に達しています。写真か${APP_PRESET.itemNoun}を整理すると追加できます`);
+    } else {
+      toast(`写真は${MAX_PHOTOS}枚までです`);
+    }
+    return;
+  }
   const picked = Array.from(files).slice(0, room);
   if (files.length > room) toast(`残り${room}枚だけ追加できます`);
 
@@ -1518,7 +1537,12 @@ async function updateMenuStat() {
       usage = ` ・ 使用中 約${mb < 10 ? mb.toFixed(1) : Math.round(mb)}MB`;
     }
   } catch (_) { /* 取れない環境は表示しない */ }
-  $('#menuStat').textContent = `${APP_PRESET.itemNoun} ${r.length}/${MAX_STORES} 件 ・ 写真 ${p.length} 枚${usage}（すべてこの端末内）`;
+  const activeStores = state.restaurants.length;
+  const overStores = activeStores > MAX_STORES;
+  const overPhotos = p.length >= PHOTO_BUDGET;
+  $('#menuStat').textContent =
+    `${APP_PRESET.itemNoun} ${activeStores}/${MAX_STORES}${overStores ? '（上限オーバー）' : ''} 件 ・ ` +
+    `写真 ${p.length}/${PHOTO_BUDGET}${overPhotos ? '（満杯）' : ''} 枚${usage}`;
 }
 
 /* ---------- モーダル制御 ---------- */
