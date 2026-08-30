@@ -881,7 +881,7 @@ async function setGroupPublic(gid, on) {
     r.isPublic = on; r.updatedAt = Date.now();
     await dbPut('restaurants', r);
     const photos = await dbGetByIndex('photos', 'byRestaurant', r.id);
-    for (const p of photos) { if (!p.deleted) { p.isPublic = on; p.updatedAt = Date.now(); await dbPut('photos', p); } }
+    for (const p of photos) { if (!p.deleted) { p.isPublic = on; p.updatedAt = Date.now(); p.metaSynced = false; await dbPut('photos', p); } }
   }
   if (window.RestoSync) RestoSync.scheduleSync();
   toast(on ? '公開しました（⋯から共有URLをコピーできます）' : '非公開にしました');
