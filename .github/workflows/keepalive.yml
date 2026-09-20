@@ -1,7 +1,11 @@
 # Supabase 無料枠のポーズ（7日間無リクエストで一時停止）を防ぐキープアライブ。
-# 毎日1回、REST API に軽い select を投げてプロジェクトを「活動中」に保つだけ。
+# 毎日1回、REST API に軽い select を投げてプロジェクトを「活動中」に保つ。
 # ・anon key は公開前提の鍵（RLSでデータは守られる）なので、そのまま置いてOK＝secret不要。
-# ・データは一切読めない（RLSで anon には 0 行）が、DB へのリクエスト自体がポーズ回避になる。
+#
+# ＋【60日対策】GitHub は「リポジトリに60日間コミットが無い」と定期ワークフローを自動無効化する。
+#   そうなると ping も止まり→Supabaseがポーズする連鎖が起きる。
+#   これを防ぐため、毎月 1日・15日に “ハートビート” の空タイムスタンプを自分でコミット＆pushして、
+#   リポジトリを常に「活動中（<60日）」に保つ。人の操作は一切不要で回り続ける。
 name: keepalive
 
 on:
@@ -10,10 +14,17 @@ on:
     - cron: "17 3 * * *"
   workflow_dispatch: {} # 手動でも走らせられる（動作確認用）
 
+# ハートビートのコミットを push するために書き込み権限を付与
+permissions:
+  contents: write
+
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Ping Supabase REST
         run: |
           SUPABASE_URL="https://tnjdxdipupjuriticzxj.supabase.co"
@@ -28,3 +39,22 @@ jobs:
             echo "Unexpected status: $code"
             exit 1
           fi
+
+      - name: Heartbeat commit (60日自動無効化の防止・月2回だけ)
+        run: |
+          # 毎月 1日 と 15日 だけコミットする（最大でも約16日間隔＝60日にはるか余裕・履歴も汚しすぎない）。
+          day=$(date -u +%d)
+          if [ "$day" != "01" ] && [ "$day" != "15" ]; then
+            echo "heartbeat: 今日はコミット日ではない（1日/15日のみ）。スキップ。"
+            exit 0
+          fi
+          mkdir -p .keepalive
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .keepalive/last-run.txt
+          git config user.name "keepalive-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .keepalive/last-run.txt
+          # 差分が無ければ何もしない（安全）。[skip ci] で余計なビルドは走らせない。
+          git commit -m "chore(keepalive): heartbeat to keep the scheduled workflow alive [skip ci]" || {
+            echo "nothing to commit"; exit 0;
+          }
+          git push
