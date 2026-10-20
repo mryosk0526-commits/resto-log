@@ -13,6 +13,12 @@ create table if not exists public.restaurants (
   created_at  bigint, updated_at bigint,
   deleted     boolean not null default false
 );
+-- Data API（supabase-js）から使えるように権限を付ける。
+-- ※2026-10-30以降にSupabaseで作ったテーブルは、これが無いと「permission denied」になる。
+--   見える範囲は下のRLSのポリシーで決まるので、ここで広げても他人のデータは見えない。
+grant select on public.restaurants to anon;
+grant select, insert, update, delete on public.restaurants to authenticated;
+grant select, insert, update, delete on public.restaurants to service_role;
 alter table public.restaurants add column if not exists is_public boolean not null default false;
 alter table public.restaurants add column if not exists rating int not null default 0;
 alter table public.restaurants add column if not exists city text;
@@ -39,6 +45,12 @@ create table if not exists public.photos (
   created_at  bigint, updated_at bigint,
   deleted     boolean not null default false
 );
+-- Data API（supabase-js）から使えるように権限を付ける。
+-- ※2026-10-30以降にSupabaseで作ったテーブルは、これが無いと「permission denied」になる。
+--   見える範囲は下のRLSのポリシーで決まるので、ここで広げても他人のデータは見えない。
+grant select on public.photos to anon;
+grant select, insert, update, delete on public.photos to authenticated;
+grant select, insert, update, delete on public.photos to service_role;
 alter table public.photos add column if not exists is_public boolean not null default false;
 alter table public.photos enable row level security;
 

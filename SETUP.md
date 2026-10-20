@@ -20,6 +20,7 @@
 ## 3. テーブルを作る
 - 左メニュー **SQL Editor** → **New query** → リポジトリの `schema.sql` を丸ごと貼る → **Run**
 - 「Success」が出ればOK（`restaurants` テーブル＋本人しか読めないRLSができる）
+- ※ SQLには `grant ...` の行が入っています。2026-10-30以降に作ったSupabaseプロジェクトでは、新しいテーブルに権限が自動で付かなくなったため、これが無いとアプリから読み書きできません（「permission denied」）。消さずにそのまま Run してください。
 - 続けて **写真同期（Phase 1b）** も使うなら、同じ SQL Editor で `schema_photos.sql` を貼る → **Run**
   - `photos` テーブル（写真メタ）＋本人限定RLS＋非公開Storageバケット `photos` ができる
   - 写真の実体は Storage の `photos` バケットに `{uid}/{photoId}.jpg` で1枚1ファイル保存される

@@ -20,6 +20,12 @@ create table if not exists public.restaurants (
   deleted     boolean not null default false
 );
 
+-- Data API（supabase-js）から使えるように権限を付ける。
+-- ※2026-10-30以降にSupabaseで作ったテーブルは、これが無いと「permission denied」になる。
+--   見える範囲は下のRLSのポリシーで決まるので、ここで広げても他人のデータは見えない。
+grant select on public.restaurants to anon;
+grant select, insert, update, delete on public.restaurants to authenticated;
+grant select, insert, update, delete on public.restaurants to service_role;
 -- 本人のデータしか読み書きできない（RLS）
 alter table public.restaurants enable row level security;
 

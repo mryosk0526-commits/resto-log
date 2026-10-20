@@ -15,6 +15,12 @@ create table if not exists public.photos (
   deleted     boolean not null default false
 );
 
+-- Data API（supabase-js）から使えるように権限を付ける。
+-- ※2026-10-30以降にSupabaseで作ったテーブルは、これが無いと「permission denied」になる。
+--   見える範囲は下のRLSのポリシーで決まるので、ここで広げても他人のデータは見えない。
+grant select on public.photos to anon;
+grant select, insert, update, delete on public.photos to authenticated;
+grant select, insert, update, delete on public.photos to service_role;
 alter table public.photos enable row level security;
 drop policy if exists "own_p_select" on public.photos;
 drop policy if exists "own_p_insert" on public.photos;
